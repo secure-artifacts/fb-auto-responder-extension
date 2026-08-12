@@ -114,65 +114,56 @@ async function injectButtons() {
   const settings = await StorageUtil.getSettings();
   const monitoredUrls = settings.targetUrls || [];
 
-  // 寻找能够定位“互动区”的锚点
-  const shareButtons = new Set();
-  
-  // 1. 通过 aria-label 查找 (包含赞、评论、分享的各种语言)
-  const ariaLabels = [
-    '分享', 'Share', '发送给朋友', 'Send to friends', '傳送', '发送', 'Send',
+  // 1. 精确匹配包含赞、评论、分享的互动按钮 (多语言支持)
+  const ariaKeywords = [
     '赞', 'Like', '讚', 
-    '留言', 'Comment', '评论'
+    '留言', 'Comment', '评论',
+    '分享', 'Share', '发送', 'Send'
   ];
-  const selectors = ariaLabels.map(label => `[aria-label^="${label}"]`).join(', ');
-  const ariaNodes = document.querySelectorAll(selectors);
-  ariaNodes.forEach(node => shareButtons.add(node));
-
-  // 2. 查找所有的 SVG 图标按钮 (兜底 Facebook 纯图标无 aria-label 的情况)
-  const svgs = document.querySelectorAll('div[role="button"] svg');
-  svgs.forEach(svg => {
-    shareButtons.add(svg.closest('div[role="button"]'));
-  });
+  
+  // 仅抓取明确带 role="button" 且 aria-label 匹配的互动按钮
+  const selectors = ariaKeywords.map(k => `div[role="button"][aria-label^="${k}"], div[role="button"][aria-label*="${k}"]`).join(', ');
+  const candidateButtons = document.querySelectorAll(selectors);
 
   const processedBars = new Set();
 
-  shareButtons.forEach(shareBtn => {
-    if (!shareBtn) return;
+  candidateButtons.forEach(actualButton => {
+    if (!actualButton) return;
     
-    // 找到包含该元素的真正的按钮容器
-    const actualButton = shareBtn.closest('div[role="button"]') || shareBtn;
-    
-    // 向上寻找真正的 Action Bar 互动栏 (包含至少2个 role="button" 的横向容器)
+    // 严苛排除：忽略评论列表、回复区、发评论输入框、赞列表与头像等非主贴文互动区域
+    if (actualButton.closest('form') || 
+        actualButton.closest('ul') || 
+        actualButton.closest('div[aria-label*="评论"]') || 
+        actualButton.closest('div[aria-label*="Comment"]') ||
+        actualButton.closest('div[aria-label*="留言"]') ||
+        actualButton.closest('div[role="article"] div[role="article"]')) {
+      return;
+    }
+
+    // 找到互动栏的真正横向 flex 容器 (FB 结构通常为: 横向 Row -> 单个 Cell -> 按钮)
     let actionBar = actualButton.parentElement;
-    while (actionBar && actionBar !== document.body && actionBar.tagName !== 'ARTICLE') {
-      const buttonsInside = actionBar.querySelectorAll('div[role="button"]');
-      if (buttonsInside.length >= 2) {
-        break; // 找到了包含“赞/评论/分享”等多个按钮的真正互动栏容器
-      }
+    if (actionBar && actionBar.children.length === 1) {
       actionBar = actionBar.parentElement;
     }
 
     if (!actionBar || actionBar.hasAttribute('data-dm-injected') || processedBars.has(actionBar)) return;
 
-    // 严苛过滤：必须包含 SVG 图标，防止误匹配到无关区域
-    const hasSvg = actionBar.querySelector('svg');
-    if (!hasSvg) return;
-
-    // 标记为已处理
+    // 标记为已处理，防止重复注入
     processedBars.add(actionBar);
     actionBar.setAttribute('data-dm-injected', 'true');
 
-    // 提取 URL
+    // 提取贴文链接
     const postUrl = extractPostUrl(actionBar);
     if (!postUrl) return;
 
     const isMonitored = monitoredUrls.some(u => postUrl.includes(u) || u.includes(postUrl));
 
-    // 创建精致的 Icon 按钮
+    // 创建按钮
     const btn = document.createElement('div');
     btn.className = 'fb-auto-dm-btn ' + (isMonitored ? 'state-active' : 'state-idle');
     btn.title = isMonitored ? '✓ 取消监控' : '🌟 开启监控';
     
-    // 使用插件的 Logo 作为图标
+    // 插件 Logo 图标
     const img = document.createElement('img');
     img.src = chrome.runtime.getURL("assets/icon48.png");
     btn.appendChild(img);
@@ -183,14 +174,8 @@ async function injectButtons() {
       toggleMonitorStatus(btn, postUrl);
     });
 
-    // 尽量插入到最后一个 role="button" 的同级后面，保证排版整齐不重叠
-    const allButtons = actionBar.querySelectorAll('div[role="button"]');
-    const lastButton = allButtons[allButtons.length - 1];
-    if (lastButton && lastButton.parentElement === actionBar) {
-      actionBar.insertBefore(btn, lastButton.nextSibling);
-    } else {
-      actionBar.appendChild(btn);
-    }
+    // 插入到互动栏最右侧
+    actionBar.appendChild(btn);
   });
 }
 
