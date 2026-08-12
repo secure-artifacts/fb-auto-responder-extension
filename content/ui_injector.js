@@ -152,36 +152,34 @@ async function injectButtons() {
   const selectors = ariaKeywords.map(k => `div[role="button"][aria-label^="${k}"], div[role="button"][aria-label*="${k}"]`).join(', ');
   const candidateButtons = document.querySelectorAll(selectors);
 
-  const processedContainers = new Set();
-
   candidateButtons.forEach(btnElement => {
     if (!btnElement) return;
     
-    // 排除评论区、回复区、评论输入框
+    // 严苛排除：评论区、回复区、发评论输入框
     if (btnElement.closest('form') || 
         btnElement.closest('ul') || 
         btnElement.closest('div[role="article"] div[role="article"]')) {
       return;
     }
 
-    // 获取贴文/Reels 顶级容器
-    const container = getPostContainer(btnElement);
-    if (!container || container.hasAttribute('data-dm-injected') || processedContainers.has(container)) return;
+    // 向上穿透寻找真正的横向按钮排列栏 (跳过只有1个子元素的单按钮包装层)
+    let actionBar = btnElement.parentElement;
+    while (actionBar && actionBar !== document.body && actionBar.children.length === 1) {
+      actionBar = actionBar.parentElement;
+    }
 
-    // 标记该贴文容器，单条贴文绝对不再重复注入！
-    processedContainers.add(container);
-    container.setAttribute('data-dm-injected', 'true');
+    if (!actionBar || actionBar.hasAttribute('data-dm-injected')) return;
 
-    // 找到最佳挂载按钮 (优先选择“分享”，其次选择“留言”，最后选择“赞”)
-    const targetBtn = getBestTargetButton(container) || btnElement;
+    // 标记当前贴文互动栏，确保单条贴文绝对只加一个按钮，绝不遗漏也绝重复
+    actionBar.setAttribute('data-dm-injected', 'true');
 
-    // 提取链接
-    const postUrl = extractPostUrl(targetBtn);
+    // 提取贴文链接
+    const postUrl = extractPostUrl(btnElement);
     if (!postUrl) return;
 
     const isMonitored = monitoredUrls.some(u => postUrl.includes(u) || u.includes(postUrl));
 
-    // 创建图标按钮
+    // 创建精致图标按钮
     const btn = document.createElement('div');
     btn.className = 'fb-auto-dm-btn ' + (isMonitored ? 'state-active' : 'state-idle');
     btn.title = isMonitored ? '✓ 取消监控' : '🌟 开启监控';
@@ -196,8 +194,16 @@ async function injectButtons() {
       toggleMonitorStatus(btn, postUrl);
     });
 
-    // 紧贴挂载在 targetBtn 的同级后方
-    targetBtn.insertAdjacentElement('afterend', btn);
+    // 强制把容器设为单行横向 Flex 排版，防止把 Facebook 的分享等按钮挤压折行
+    try {
+      actionBar.style.setProperty('display', 'flex', 'important');
+      actionBar.style.setProperty('flex-direction', 'row', 'important');
+      actionBar.style.setProperty('flex-wrap', 'nowrap', 'important');
+      actionBar.style.setProperty('align-items', 'center', 'important');
+    } catch (e) {}
+
+    // 追加挂载到互动栏末尾
+    actionBar.appendChild(btn);
   });
 }
 
