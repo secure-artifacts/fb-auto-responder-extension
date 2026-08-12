@@ -110,60 +110,82 @@ async function toggleMonitorStatus(btn, postUrl) {
   }
 }
 
+function getPostContainer(btn) {
+  let c = btn.closest('div[role="article"]') || 
+          btn.closest('div[data-pagelet^="FeedUnit"]') ||
+          btn.closest('div[data-pagelet*="Reel"]') ||
+          btn.closest('div[aria-label*="Reel"]');
+  if (!c) {
+    c = btn.parentElement;
+    for (let i = 0; i < 6; i++) {
+      if (c && c.parentElement && c.parentElement !== document.body) {
+        c = c.parentElement;
+      }
+    }
+  }
+  return c;
+}
+
+function getBestTargetButton(container) {
+  const share = container.querySelector('div[role="button"][aria-label*="分享"], div[role="button"][aria-label*="Share"], div[role="button"][aria-label*="发送"], div[role="button"][aria-label*="Send"]');
+  if (share) return share;
+
+  const comment = container.querySelector('div[role="button"][aria-label*="留言"], div[role="button"][aria-label*="Comment"], div[role="button"][aria-label*="评论"]');
+  if (comment) return comment;
+
+  const like = container.querySelector('div[role="button"][aria-label*="赞"], div[role="button"][aria-label*="Like"], div[role="button"][aria-label*="讚"]');
+  if (like) return like;
+
+  return null;
+}
+
 async function injectButtons() {
   const settings = await StorageUtil.getSettings();
   const monitoredUrls = settings.targetUrls || [];
 
-  // 1. 精确匹配包含赞、评论、分享的互动按钮 (多语言支持)
   const ariaKeywords = [
     '赞', 'Like', '讚', 
     '留言', 'Comment', '评论',
     '分享', 'Share', '发送', 'Send'
   ];
   
-  // 仅抓取明确带 role="button" 且 aria-label 匹配的互动按钮
   const selectors = ariaKeywords.map(k => `div[role="button"][aria-label^="${k}"], div[role="button"][aria-label*="${k}"]`).join(', ');
   const candidateButtons = document.querySelectorAll(selectors);
 
-  const processedBars = new Set();
+  const processedContainers = new Set();
 
-  candidateButtons.forEach(actualButton => {
-    if (!actualButton) return;
+  candidateButtons.forEach(btnElement => {
+    if (!btnElement) return;
     
-    // 严苛排除：忽略评论列表、回复区、发评论输入框、赞列表与头像等非主贴文互动区域
-    if (actualButton.closest('form') || 
-        actualButton.closest('ul') || 
-        actualButton.closest('div[aria-label*="评论"]') || 
-        actualButton.closest('div[aria-label*="Comment"]') ||
-        actualButton.closest('div[aria-label*="留言"]') ||
-        actualButton.closest('div[role="article"] div[role="article"]')) {
+    // 排除评论区、回复区、评论输入框
+    if (btnElement.closest('form') || 
+        btnElement.closest('ul') || 
+        btnElement.closest('div[role="article"] div[role="article"]')) {
       return;
     }
 
-    // 找到互动栏的真正横向 flex 容器 (FB 结构通常为: 横向 Row -> 单个 Cell -> 按钮)
-    let actionBar = actualButton.parentElement;
-    if (actionBar && actionBar.children.length === 1) {
-      actionBar = actionBar.parentElement;
-    }
+    // 获取贴文/Reels 顶级容器
+    const container = getPostContainer(btnElement);
+    if (!container || container.hasAttribute('data-dm-injected') || processedContainers.has(container)) return;
 
-    if (!actionBar || actionBar.hasAttribute('data-dm-injected') || processedBars.has(actionBar)) return;
+    // 标记该贴文容器，单条贴文绝对不再重复注入！
+    processedContainers.add(container);
+    container.setAttribute('data-dm-injected', 'true');
 
-    // 标记为已处理，防止重复注入
-    processedBars.add(actionBar);
-    actionBar.setAttribute('data-dm-injected', 'true');
+    // 找到最佳挂载按钮 (优先选择“分享”，其次选择“留言”，最后选择“赞”)
+    const targetBtn = getBestTargetButton(container) || btnElement;
 
-    // 提取贴文链接
-    const postUrl = extractPostUrl(actionBar);
+    // 提取链接
+    const postUrl = extractPostUrl(targetBtn);
     if (!postUrl) return;
 
     const isMonitored = monitoredUrls.some(u => postUrl.includes(u) || u.includes(postUrl));
 
-    // 创建按钮
+    // 创建图标按钮
     const btn = document.createElement('div');
     btn.className = 'fb-auto-dm-btn ' + (isMonitored ? 'state-active' : 'state-idle');
     btn.title = isMonitored ? '✓ 取消监控' : '🌟 开启监控';
     
-    // 插件 Logo 图标
     const img = document.createElement('img');
     img.src = chrome.runtime.getURL("assets/icon48.png");
     btn.appendChild(img);
@@ -174,8 +196,8 @@ async function injectButtons() {
       toggleMonitorStatus(btn, postUrl);
     });
 
-    // 插入到互动栏最右侧
-    actionBar.appendChild(btn);
+    // 紧贴挂载在 targetBtn 的同级后方
+    targetBtn.insertAdjacentElement('afterend', btn);
   });
 }
 
