@@ -141,15 +141,19 @@ async function injectButtons() {
     // 找到包含该元素的真正的按钮容器
     const actualButton = shareBtn.closest('div[role="button"]') || shareBtn;
     
-    // 找到互动栏的 flex 父容器
-    const actionBar = actualButton.parentElement;
+    // 向上寻找真正的 Action Bar 互动栏 (包含至少2个 role="button" 的横向容器)
+    let actionBar = actualButton.parentElement;
+    while (actionBar && actionBar !== document.body && actionBar.tagName !== 'ARTICLE') {
+      const buttonsInside = actionBar.querySelectorAll('div[role="button"]');
+      if (buttonsInside.length >= 2) {
+        break; // 找到了包含“赞/评论/分享”等多个按钮的真正互动栏容器
+      }
+      actionBar = actionBar.parentElement;
+    }
+
     if (!actionBar || actionBar.hasAttribute('data-dm-injected') || processedBars.has(actionBar)) return;
 
-    // 严苛过滤：确保它是主贴文的互动栏，而不是评论区的回复栏
-    // 特征 1: 必须包含多个子元素 (赞、评论、分享通常是连在一起的)
-    if (actionBar.children.length < 2) return;
-    
-    // 特征 2: 主互动栏的按钮通常包含 SVG 图标，而评论区的“赞·回复”通常是纯文本
+    // 严苛过滤：必须包含 SVG 图标，防止误匹配到无关区域
     const hasSvg = actionBar.querySelector('svg');
     if (!hasSvg) return;
 
@@ -179,8 +183,14 @@ async function injectButtons() {
       toggleMonitorStatus(btn, postUrl);
     });
 
-    // 插入到 Flex 容器末尾
-    actionBar.appendChild(btn);
+    // 尽量插入到最后一个 role="button" 的同级后面，保证排版整齐不重叠
+    const allButtons = actionBar.querySelectorAll('div[role="button"]');
+    const lastButton = allButtons[allButtons.length - 1];
+    if (lastButton && lastButton.parentElement === actionBar) {
+      actionBar.insertBefore(btn, lastButton.nextSibling);
+    } else {
+      actionBar.appendChild(btn);
+    }
   });
 }
 

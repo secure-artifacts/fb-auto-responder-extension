@@ -4,17 +4,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-left: 12px; 
+  margin-left: 8px;
+  margin-right: 8px;
+  flex-shrink: 0;
+  align-self: center;
+  vertical-align: middle;
   border-radius: 50%;
   cursor: pointer;
   border: 2px solid transparent;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   user-select: none;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   box-sizing: border-box;
   background-color: transparent;
   position: relative;
+  z-index: 10;
 }
 
 .fb-auto-dm-btn img {
