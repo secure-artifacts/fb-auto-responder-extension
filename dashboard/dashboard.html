@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FB 智能自动回复与私信大师 - 全功能管理控制台</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
+        <div class="sidebar-title">
+          <h2>FB 自动回复大师</h2>
+          <span>Pro Studio v1.0</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="tab-urls">
+          <span class="nav-icon">📌</span>
+          <span>目标贴文列表</span>
+        </button>
+        <button class="nav-item" data-tab="tab-rules">
+          <span class="nav-icon">⚡</span>
+          <span>关键词与回复规则</span>
+        </button>
+        <button class="nav-item" data-tab="tab-antiban">
+          <span class="nav-icon">🛡️</span>
+          <span>防封与去重策略</span>
+        </button>
+        <button class="nav-item" data-tab="tab-logs">
+          <span class="nav-icon">📊</span>
+          <span>运行日志与导出</span>
+        </button>
+        <button class="nav-item" data-tab="tab-backup">
+          <span class="nav-icon">💾</span>
+          <span>配置导入与备份</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-summary">
+          <span class="status-indicator-dot" id="sideStatusDot"></span>
+          <span id="sideStatusText">系统就绪</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <header class="top-bar">
+        <div class="top-title-group">
+          <div class="top-title" id="pageTitle">目标贴文管理</div>
+          <div class="live-status-pill idle" id="topStatusPill">
+            <span class="pill-dot"></span>
+            <span id="topStatusPillText">系统就绪 (已停机)</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button class="btn-top btn-top-start idle" id="topBtnStart">
+            <span class="btn-icon">▶</span>
+            <span id="topBtnStartText">启动任务</span>
+          </button>
+          <button class="btn-top btn-top-stop" id="topBtnStop" disabled>
+            <span class="btn-icon">⏹</span>
+            <span>停止任务</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="content-body">
+
+        <!-- TAB 1: 目标贴文列表 -->
+        <section class="tab-panel active" id="tab-urls">
+          <div class="card">
+            <div class="card-header">
+              <h3>📌 监控贴文 URL 列表</h3>
+              <p class="subtitle">请输入你需要自动化监控的 FB 贴文完整链接（支持谷歌表格直接复制多行一键粘贴）</p>
+            </div>
+            <div class="card-body">
+              <textarea id="inputTargetUrls" class="form-textarea" rows="4" placeholder="https://www.facebook.com/permalink.php?story_fbid=...\nhttps://www.facebook.com/pageName/posts/..."></textarea>
+              
+              <div class="mt-4">
+                <label class="grid-title">🌟 活跃账号伪装链接 (防封必备)</label>
+                <small class="help-text">插件在扫描贴文之间，会随机访问以下链接，完全模拟真人浏览和滚动，极大降低被检测风险。（一行一个）</small>
+                <textarea id="inputActiveUrls" class="form-textarea mt-2" rows="3" placeholder="https://www.facebook.com/\nhttps://www.facebook.com/reels"></textarea>
+              </div>
+
+              <div class="form-actions mt-3">
+                <div class="btn-group">
+                  <button class="btn btn-primary" id="btnSaveUrls">保存全部链接</button>
+                  <button class="btn btn-danger-outline" id="btnClearUrls">🗑️ 一键清空</button>
+                </div>
+                <span class="save-tip" id="tipSaveUrls"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: 关键词与回复规则 -->
+        <section class="tab-panel" id="tab-rules">
+          <div class="card">
+            <div class="card-header">
+              <div class="header-with-btn">
+                <div>
+                  <h3>⚡ 关键词触发回复规则管理</h3>
+                  <p class="subtitle">设置关键词，以及对应的私信话术。支持添加多套备用话术进行随机发送（极度防封）。</p>
+                </div>
+                <button class="btn btn-success" id="btnAddRule">+ 新建触发规则</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="rules-list" id="rulesContainer">
+                <!-- 动态渲染规则列表 -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 3: 防封与去重策略 -->
+        <section class="tab-panel" id="tab-antiban">
+          <div class="card">
+            <div class="card-header">
+              <h3>🛡️ 智能防封控与去重参数配置</h3>
+              <p class="subtitle">全方位保护你的 FB 账号及公共主页免受频率过快限制</p>
+            </div>
+            <div class="card-body">
+              <div class="form-grid">
+
+                <div class="form-group">
+                  <label>连续私信间隔时间 (秒):</label>
+                  <div class="range-inputs">
+                    <input type="number" id="inputDmInterval" class="form-input" min="3" max="300" value="10">
+                    <span>秒</span>
+                  </div>
+                  <small class="help-text">在连续私信不同用户时，每发送一条后的等待时间。设置合适的间隔可以防止操作过快被限制。</small>
+                </div>
+
+                <div class="form-group">
+                  <label>页面停留与切换间隔 (秒):</label>
+                  <div class="range-inputs">
+                    <input type="number" id="inputSwitchInterval" class="form-input" min="5" max="300" value="15">
+                    <span>秒</span>
+                  </div>
+                  <small class="help-text">插件加载每一个链接后（不论是贴文还是伪装链接），最少停留/等待多长时间才进行下一个动作。时间越长越安全。</small>
+                </div>
+
+                <div class="form-group">
+                  <label>全局用户去重冷却时间 (小时):</label>
+                  <div class="range-inputs">
+                    <input type="number" id="inputCooldown" class="form-input" min="0" max="720" value="24">
+                    <span>小时</span>
+                    <button class="btn btn-secondary btn-sm" id="btnResetUserHistory">🔄 一键清空去重历史 (用于重新测试)</button>
+                  </div>
+                  <small class="help-text">设定的时间内同一用户不重复触发。设为 <b>0</b> 代表禁用去重（测试时建议设为 0 或点击一键清空去重历史）。</small>
+                </div>
+                <div class="form-group checkbox-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="checkIncludeHistory">
+                    <span>处理历史留言（打勾扫描过去超过24小时的旧留言，默认不打勾只处理新留言。测试时建议打勾！）</span>
+                  </label>
+                </div>
+                <div class="form-group checkbox-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="checkEmergencyBrake" checked>
+                    <span>开启 FB 验证码与风险熔断自动暂停（检测到弹窗验证或风控警告时立即紧急刹车）</span>
+                  </label>
+                </div>
+
+              </div>
+              <div class="form-actions mt-4">
+                <button class="btn btn-primary" id="btnSaveAntiban">保存防封策略</button>
+                <span class="save-tip" id="tipSaveAntiban"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: 运行日志与导出 -->
+        <section class="tab-panel" id="tab-logs">
+          <div class="card">
+            <div class="card-header">
+              <div class="header-with-btn">
+                <div>
+                  <h3>📊 实时自动化操作日志看板</h3>
+                  <p class="subtitle">实时监控每一条留言匹配记录、发送状态及详细反馈</p>
+                </div>
+                <div class="btn-group">
+                  <button class="btn btn-success" id="btnExportExcel">📥 一键导出 Excel 记录</button>
+                  <button class="btn btn-secondary" id="btnResetHistoryLogs">🔄 清空去重历史</button>
+                  <button class="btn btn-danger-outline" id="btnClearLogs">清空当前日志</button>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>留言用户</th>
+                      <th>主页链接</th>
+                      <th>目标贴文</th>
+                      <th>匹配关键词</th>
+                      <th>留言内容</th>
+                      <th>私信状态</th>
+                    </tr>
+                  </thead>
+                  <tbody id="logsTableBody">
+                    <tr><td colspan="6" class="empty-cell">暂无日志数据</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 5: 配置备份 -->
+        <section class="tab-panel" id="tab-backup">
+          <div class="card">
+            <div class="card-header">
+              <h3>💾 配置文件导入与备份</h3>
+              <p class="subtitle">导出你的全部关键词、贴文链接与话术配置为 JSON 文件，或在其他电脑上一键导入共享</p>
+            </div>
+            <div class="card-body">
+              <div class="backup-actions">
+                <div class="backup-box">
+                  <h4>备份导出</h4>
+                  <p>将当前所有设置和规则保存为 `.json` 文件。</p>
+                  <button class="btn btn-primary" id="btnExportConfig">📥 导出配置文件</button>
+                </div>
+                <div class="backup-box">
+                  <h4>恢复/导入</h4>
+                  <p>选择本地 `.json` 配置文件覆盖当前规则。</p>
+                  <input type="file" id="fileImportConfig" accept=".json" style="display: none;">
+                  <button class="btn btn-success" id="btnImportConfig">📤 导入配置文件</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- 规则编辑 Modal 模态框 (包含谷歌表格高阶单元格网格与一键清空按钮) -->
+  <div class="modal" id="ruleModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h3 id="modalTitle">编辑触发规则</h3>
+        <button class="modal-close" id="btnModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>规则名称:</label>
+          <input type="text" id="ruleName" class="form-input" placeholder="例: Amen 资料领用规则">
+        </div>
+
+        <div class="form-group">
+          <label>关键词匹配模式:</label>
+          <select id="ruleMatchType" class="form-select">
+            <option value="contains">包含关键词 (推荐: 包含该单词/词汇即可触发，如 Amen / Amém)</option>
+            <option value="exact">完全精准匹配 (留言必须完全一致)</option>
+          </select>
+        </div>
+
+
+
+        <!-- 谷歌表格单元格网格 1: 关键词网格 -->
+        <div class="grid-section">
+          <div class="grid-section-header">
+            <div>
+              <label class="grid-title">📊 关键词单元格网格 (Keywords Grid)</label>
+              <small class="help-text">支持从谷歌表格或 Excel 批量复制粘贴词汇，自动拆分为各个独立关键词单元格。</small>
+            </div>
+            <div class="grid-header-actions">
+              <button class="btn btn-secondary btn-sm" id="btnAddKeywordCell">+ 添加关键词单元格</button>
+              <button class="btn btn-danger-outline btn-sm" id="btnClearKeywordsGrid">🗑️ 一键清空关键词</button>
+            </div>
+          </div>
+          <div class="sheets-grid-container grid-keywords" id="keywordsGrid">
+            <!-- 动态生成的单元格 -->
+          </div>
+        </div>
+
+        <!-- 谷歌表格单元格网格 2: 私信话术网格 -->
+        <div class="grid-section mt-3">
+          <div class="grid-section-header">
+            <div>
+              <label class="grid-title">✉️ 私信 (DM) 话术库 (支持任意粘贴)</label>
+              <small class="help-text"><b>你可以添加多套备用私信。</b> 插件在运行时，会自动在这几套话术里<b>随机抽取一套</b>发送，极大降低被 Facebook 判为机器人的风险！<br>
+              💡 <b>高级技巧：</b> 在内容中插入 <code>[Name]</code>，发送时会自动替换为留言用户的名字（例如：你好 [Name]，我是...）</small>
+            </div>
+            <div class="grid-header-actions">
+              <button class="btn btn-secondary btn-sm" id="btnAddDmCell">+ 添加备用话术 (随机发送防封)</button>
+              <button class="btn btn-danger-outline btn-sm" id="btnClearDmGrid">🗑️ 一键清空私信</button>
+            </div>
+          </div>
+          <div class="sheets-grid-container grid-templates" id="dmTemplatesGrid">
+            <!-- 动态生成的长文单元格 -->
+          </div>
+        </div>
+
+
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnModalCancel">取消</button>
+        <button class="btn btn-primary" id="btnModalSave">保存规则</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../utils/storage.js"></script>
+  <script src="../utils/excel_exporter.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

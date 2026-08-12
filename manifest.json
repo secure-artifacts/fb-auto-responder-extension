@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "FB 智能私信大师",
+  "short_name": "FB Auto-Responder",
+  "version": "5.0.0",
+  "description": "全自动监控指定脸书贴文留言，按顺序安全私信用户，极致防封，专为私信营销打造。",
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": "assets/icon48.png",
+    "default_title": "FB 智能私信大师 v5.0"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.facebook.com/*",
+    "https://*.messenger.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.facebook.com/*"
+      ],
+      "css": [
+        "content/ui_injector.css"
+      ],
+      "js": [
+        "utils/storage.js",
+        "content/post_scrub.js",
+        "content/ui_injector.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/icon48.png"],
+      "matches": ["https://*.facebook.com/*"]
+    }
+  ],
+  "options_page": "dashboard/dashboard.html"
+}

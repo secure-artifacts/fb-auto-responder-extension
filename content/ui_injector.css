@@ -1,0 +1,90 @@
+/* FB Auto-Responder UI Injector Styles */
+
+.fb-auto-dm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 12px; 
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  user-select: none;
+  width: 36px;
+  height: 36px;
+  box-sizing: border-box;
+  background-color: transparent;
+  position: relative;
+}
+
+.fb-auto-dm-btn img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  filter: grayscale(100%) opacity(0.6);
+}
+
+/* 默认状态：未加入监控 */
+.fb-auto-dm-btn.state-idle:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+.fb-auto-dm-btn.state-idle:hover img {
+  filter: grayscale(0%) opacity(1);
+  transform: scale(1.1);
+}
+
+/* 激活状态：已加入监控 */
+.fb-auto-dm-btn.state-active {
+  background-color: rgba(24, 119, 242, 0.1);
+  border-color: #1877f2;
+  box-shadow: 0 0 10px rgba(24, 119, 242, 0.3);
+}
+
+.fb-auto-dm-btn.state-active img {
+  filter: grayscale(0%) opacity(1);
+}
+
+.fb-auto-dm-btn.state-active:hover {
+  background-color: rgba(24, 119, 242, 0.2);
+  transform: scale(1.05);
+}
+
+/* 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .fb-auto-dm-btn.state-idle:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+  .fb-auto-dm-btn.state-active {
+    background-color: rgba(45, 136, 255, 0.2);
+    border-color: #4599ff;
+    box-shadow: 0 0 10px rgba(45, 136, 255, 0.3);
+  }
+  .fb-auto-dm-btn.state-active:hover {
+    background-color: rgba(45, 136, 255, 0.3);
+  }
+}
+
+/* Toast 提示弹窗 */
+.fb-auto-dm-toast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background-color: #333;
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 999999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.fb-auto-dm-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
