@@ -27,7 +27,7 @@ jobs:
           subject-path: '*.zip'
 
       - name: Create Release
-        uses: actions/softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2
         with:
           files: '*.zip'
           generate_release_notes: true
