@@ -5,9 +5,21 @@
 
 importScripts('../utils/storage.js');
 
-let workerTabId = null;
-let currentUrlIndex = 0;
-let isNextFiller = false;
+async function getWorkerState() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['workerState'], (res) => {
+      resolve(res.workerState || { workerTabId: null, currentUrlIndex: 0, isNextFiller: false });
+    });
+  });
+}
+
+async function setWorkerState(newState) {
+  const current = await getWorkerState();
+  const updated = { ...current, ...newState };
+  return new Promise(resolve => {
+    chrome.storage.local.set({ workerState: updated }, () => resolve(updated));
+  });
+}
 
 console.log("FB Auto-Responder Service Worker v5.0.0 Initialized.");
 
@@ -49,8 +61,10 @@ async function startMonitoring() {
 
 async function stopMonitoring(isPaused) {
   await StorageUtil.saveSettings({ isRunning: false, isPaused: isPaused });
-  if (!isPaused) currentUrlIndex = 0;
-  closeWorkerTab();
+  if (!isPaused) {
+    await setWorkerState({ currentUrlIndex: 0 });
+  }
+  await closeWorkerTab();
 }
 
 async function scheduleNextUrl() {
@@ -60,12 +74,16 @@ async function scheduleNextUrl() {
   const urls = settings.targetUrls || [];
   if (urls.length === 0) return;
 
+  const state = await getWorkerState();
+  let currentUrlIndex = state.currentUrlIndex;
+
   // 只有当刚处理完目标贴文（即 isNextFiller 为 true），才将目标贴文 index + 1
-  if (isNextFiller) {
+  if (state.isNextFiller) {
     currentUrlIndex++;
     if (currentUrlIndex >= urls.length) {
       currentUrlIndex = 0;
     }
+    await setWorkerState({ currentUrlIndex });
   }
 
   // 页面切换间隔，防封（读取用户设置，默认 15 秒）
@@ -86,6 +104,9 @@ async function loadCurrentUrl() {
   if (targets.length === 0) return;
 
   let targetUrl = "";
+  const state = await getWorkerState();
+  let currentUrlIndex = state.currentUrlIndex;
+  let isNextFiller = state.isNextFiller;
 
   if (isNextFiller && fillers.length > 0) {
     // 这次应该加载伪装链接
@@ -94,22 +115,28 @@ async function loadCurrentUrl() {
       statusMessage: `正在访问伪装链接 (防封浏览): ${targetUrl.substring(0, 45)}...`,
       currentWorkerMode: 'filler'
     });
-    isNextFiller = false;
+    await setWorkerState({ isNextFiller: false });
   } else {
     // 这次应该加载真实监控贴文
-    if (currentUrlIndex >= targets.length) currentUrlIndex = 0;
+    if (currentUrlIndex >= targets.length) {
+      currentUrlIndex = 0;
+      await setWorkerState({ currentUrlIndex });
+    }
     targetUrl = targets[currentUrlIndex];
     await StorageUtil.saveSettings({
       statusMessage: `正在监控 [${currentUrlIndex + 1}/${targets.length}]: ${targetUrl.substring(0, 45)}...`,
       currentWorkerMode: 'target'
     });
-    isNextFiller = true;
+    await setWorkerState({ isNextFiller: true });
   }
 
+  const finalState = await getWorkerState();
+  const workerTabId = finalState.workerTabId;
+
   if (workerTabId) {
-    chrome.tabs.get(workerTabId, (tab) => {
+    chrome.tabs.get(workerTabId, async (tab) => {
       if (chrome.runtime.lastError || !tab) {
-        workerTabId = null;
+        await setWorkerState({ workerTabId: null });
         createWorkerTab(targetUrl);
       } else {
         // 如果当前 URL 和目标 URL 几乎一样，强制刷新页面以重启 Content Script
@@ -126,21 +153,22 @@ async function loadCurrentUrl() {
 }
 
 function createWorkerTab(url) {
-  chrome.tabs.create({ url: url, active: false }, (tab) => {
+  chrome.tabs.create({ url: url, active: false }, async (tab) => {
     if (chrome.runtime.lastError) {
       console.error("Tab create error:", chrome.runtime.lastError.message);
       return;
     }
-    workerTabId = tab.id;
+    await setWorkerState({ workerTabId: tab.id });
   });
 }
 
-function closeWorkerTab() {
-  if (workerTabId) {
-    chrome.tabs.remove(workerTabId, () => {
+async function closeWorkerTab() {
+  const state = await getWorkerState();
+  if (state.workerTabId) {
+    chrome.tabs.remove(state.workerTabId, () => {
       if (chrome.runtime.lastError) { /* suppress */ }
     });
-    workerTabId = null;
+    await setWorkerState({ workerTabId: null });
   }
 }
 
