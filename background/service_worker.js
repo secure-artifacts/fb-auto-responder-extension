@@ -108,7 +108,7 @@ async function loadCurrentUrl() {
   let currentUrlIndex = state.currentUrlIndex;
   let isNextFiller = state.isNextFiller;
 
-  if (isNextFiller && fillers.length > 0) {
+  if (isNextFiller && fillers.length > 0 && settings.enableFillerUrls !== false) {
     // 这次应该加载伪装链接
     targetUrl = fillers[Math.floor(Math.random() * fillers.length)];
     // 如果有多个伪装链接，且随机抽取到了和上次完全一样的链接，则向后顺延一个，保证不连续重复

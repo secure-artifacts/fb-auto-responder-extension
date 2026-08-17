@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.0.8</span>
+          <span>Pro Studio v1.0.9</span>
         </div>
       </div>
 
@@ -89,7 +89,13 @@
               </div>
               
               <div class="mt-4">
-                <label class="grid-title">🌟 活跃账号伪装链接 (防封必备)</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <label class="grid-title" style="margin: 0;">🌟 活跃账号伪装链接 (防封必备)</label>
+                  <label class="checkbox-label" style="margin: 0;">
+                    <input type="checkbox" id="checkEnableFillerUrls" checked>
+                    <span style="font-size: 13px; font-weight: normal;">启用伪装访问 (若需极速抢线回复可暂时关闭)</span>
+                  </label>
+                </div>
                 <small class="help-text">插件在扫描贴文之间，会随机访问以下链接，完全模拟真人浏览和滚动，极大降低被检测风险。（一行一个）</small>
                 <div style="position: relative;">
                   <textarea id="inputActiveUrls" class="form-textarea mt-2" rows="3" placeholder="https://www.facebook.com/\nhttps://www.facebook.com/reels"></textarea>

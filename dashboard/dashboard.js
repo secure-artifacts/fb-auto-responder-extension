@@ -99,6 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ==================== TAB 1: 贴文管理 ====================
   const inputTargetUrls = document.getElementById('inputTargetUrls');
   const inputActiveUrls = document.getElementById('inputActiveUrls');
+  const checkEnableFillerUrls = document.getElementById('checkEnableFillerUrls');
   const btnSaveUrls = document.getElementById('btnSaveUrls');
   const btnClearTargetUrls = document.getElementById('btnClearTargetUrls');
   const btnClearActiveUrls = document.getElementById('btnClearActiveUrls');
@@ -108,12 +109,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const settings = await StorageUtil.getSettings();
     inputTargetUrls.value = (settings.targetUrls || []).join('\n');
     inputActiveUrls.value = (settings.activeUrls || []).join('\n');
+    if (checkEnableFillerUrls) {
+      checkEnableFillerUrls.checked = settings.enableFillerUrls !== false;
+    }
   }
 
   btnSaveUrls.addEventListener('click', async () => {
     const targetLines = inputTargetUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
     const activeLines = inputActiveUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
-    await StorageUtil.saveSettings({ targetUrls: targetLines, activeUrls: activeLines });
+    const enableFiller = checkEnableFillerUrls ? checkEnableFillerUrls.checked : true;
+    await StorageUtil.saveSettings({ targetUrls: targetLines, activeUrls: activeLines, enableFillerUrls: enableFiller });
     tipSaveUrls.textContent = `✓ 已成功保存 ${targetLines.length} 条监控贴文，${activeLines.length} 条伪装链接！`;
     setTimeout(() => tipSaveUrls.textContent = '', 3000);
   });

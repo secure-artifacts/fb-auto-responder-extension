@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS = {
   dmCooldownHours: 24, // 私信专属 24 小时冷却
   dmIntervalSeconds: 10, // 连续发私信的时间间隔
   switchIntervalSeconds: 15, // 页面停留与切换间隔（秒）
+  enableFillerUrls: true, // 是否开启伪装链接防封浏览
   fillerWaitMin: 15, // 伪装页面最短停留时间（秒）
   fillerWaitMax: 45, // 伪装页面最长停留时间（秒）
   emergencyBrakeEnabled: true,
