@@ -470,6 +470,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const inputDmInterval = document.getElementById('inputDmInterval');
   const inputCooldown = document.getElementById('inputCooldown');
   const inputSwitchInterval = document.getElementById('inputSwitchInterval');
+  const inputFillerWaitMin = document.getElementById('inputFillerWaitMin');
+  const inputFillerWaitMax = document.getElementById('inputFillerWaitMax');
   const checkIncludeHistory = document.getElementById('checkIncludeHistory');
   const checkEmergencyBrake = document.getElementById('checkEmergencyBrake');
   const btnSaveAntiban = document.getElementById('btnSaveAntiban');
@@ -481,6 +483,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputDmInterval.value = settings.dmIntervalSeconds || 10;
     inputCooldown.value = settings.globalCooldownHours !== undefined ? settings.globalCooldownHours : 24;
     inputSwitchInterval.value = settings.switchIntervalSeconds || 15;
+    inputFillerWaitMin.value = settings.fillerWaitMin || 15;
+    inputFillerWaitMax.value = settings.fillerWaitMax || 45;
     if (checkIncludeHistory) checkIncludeHistory.checked = !!settings.includeHistory;
     if (checkEmergencyBrake) checkEmergencyBrake.checked = settings.emergencyBrakeEnabled !== false;
   }
@@ -489,6 +493,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const dmSec = parseInt(inputDmInterval.value, 10) || 10;
     const cdHr = parseInt(inputCooldown.value, 10) || 24;
     const switchSec = parseInt(inputSwitchInterval.value, 10) || 15;
+    const fillerMin = parseInt(inputFillerWaitMin.value, 10) || 15;
+    const fillerMax = parseInt(inputFillerWaitMax.value, 10) || 45;
     const includeHistory = checkIncludeHistory ? checkIncludeHistory.checked : false;
     const emergencyBrake = checkEmergencyBrake ? checkEmergencyBrake.checked : true;
 
@@ -497,6 +503,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       globalCooldownHours: cdHr,
       dmCooldownHours: cdHr,
       switchIntervalSeconds: switchSec,
+      fillerWaitMin: fillerMin,
+      fillerWaitMax: Math.max(fillerMin, fillerMax),
       includeHistory: includeHistory,
       emergencyBrakeEnabled: emergencyBrake
     });

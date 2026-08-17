@@ -53,22 +53,34 @@
   async function simulateHumanBrowsingAndFinish(settings) {
     console.log("[V5.0] 当前为活跃账号伪装链接，模拟真人浏览...");
     
-    // 读取设定的页面停留时间（如果没有，默认给一个 12 秒）
-    const waitSeconds = settings.switchIntervalSeconds || 12;
-    await StorageUtil.saveSettings({ statusMessage: `正在模拟真人浏览页面，停留 ${waitSeconds} 秒...` });
+    // 读取设定的页面停留时间范围，默认 15 - 45 秒
+    const minWait = settings.fillerWaitMin || 15;
+    const maxWait = settings.fillerWaitMax || 45;
+    const waitSeconds = Math.floor(Math.random() * (maxWait - minWait + 1)) + minWait;
     
-    // 把总时间切分成几次随机滚动
-    const scrolls = 3;
-    const intervalMs = (waitSeconds * 1000) / scrolls;
+    await StorageUtil.saveSettings({ statusMessage: `正在模拟真人浏览伪装页面，随机停留 ${waitSeconds} 秒...` });
+    
+    // 把总时间切分成几次随机动作（滑动、暂停）
+    const actions = Math.floor(waitSeconds / 3); // 大约每3秒一个动作
+    const intervalMs = (waitSeconds * 1000) / actions;
 
-    for (let i = 0; i < scrolls; i++) {
+    for (let i = 0; i < actions; i++) {
       if (checkFacebookEmergencyBrake()) return;
       
       await new Promise(r => setTimeout(r, intervalMs));
       
-      // 随机向下滚动 200 - 800 像素
-      const scrollAmount = 200 + Math.random() * 600;
-      window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+      // 随机决定是向下滚、向上滚、还是原地看
+      const actionType = Math.random();
+      if (actionType < 0.6) {
+        // 60%概率向下滚
+        const scrollAmount = 200 + Math.random() * 800;
+        window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+      } else if (actionType < 0.8) {
+        // 20%概率向上回看
+        const scrollAmount = -(100 + Math.random() * 400);
+        window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+      }
+      // 剩下20%概率原地不动看内容
     }
 
     finishPageAndNext();

@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.0.6</span>
+          <span>Pro Studio v1.0.7</span>
         </div>
       </div>
 
@@ -154,7 +154,18 @@
                     <input type="number" id="inputSwitchInterval" class="form-input" min="5" max="300" value="15">
                     <span>秒</span>
                   </div>
-                  <small class="help-text">插件加载每一个链接后（不论是贴文还是伪装链接），最少停留/等待多长时间才进行下一个动作。时间越长越安全。</small>
+                  <small class="help-text">针对目标贴文页面的固定停留与等待时间。时间越长越安全。</small>
+                </div>
+
+                <div class="form-group">
+                  <label>伪装页面随机停留时间 (秒):</label>
+                  <div class="range-inputs" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="number" id="inputFillerWaitMin" class="form-input" min="5" max="300" value="15" style="width: 80px;">
+                    <span>至</span>
+                    <input type="number" id="inputFillerWaitMax" class="form-input" min="5" max="600" value="45" style="width: 80px;">
+                    <span>秒</span>
+                  </div>
+                  <small class="help-text">每次访问伪装链接时，在这个范围内随机生成一个时间，模拟真人的停留与滚动。</small>
                 </div>
 
                 <div class="form-group">
