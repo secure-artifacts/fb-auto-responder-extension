@@ -111,11 +111,17 @@ async function loadCurrentUrl() {
   if (isNextFiller && fillers.length > 0) {
     // 这次应该加载伪装链接
     targetUrl = fillers[Math.floor(Math.random() * fillers.length)];
+    // 如果有多个伪装链接，且随机抽取到了和上次完全一样的链接，则向后顺延一个，保证不连续重复
+    if (fillers.length > 1 && state.lastFillerUrl === targetUrl) {
+      const currentIndex = fillers.indexOf(targetUrl);
+      targetUrl = fillers[(currentIndex + 1) % fillers.length];
+    }
+    
     await StorageUtil.saveSettings({
       statusMessage: `正在访问伪装链接 (防封浏览): ${targetUrl.substring(0, 45)}...`,
       currentWorkerMode: 'filler'
     });
-    await setWorkerState({ isNextFiller: false });
+    await setWorkerState({ isNextFiller: false, lastFillerUrl: targetUrl });
   } else {
     // 这次应该加载真实监控贴文
     if (currentUrlIndex >= targets.length) {
