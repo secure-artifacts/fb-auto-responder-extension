@@ -139,8 +139,9 @@ async function loadCurrentUrl() {
         await setWorkerState({ workerTabId: null });
         createWorkerTab(targetUrl);
       } else {
-        // 如果当前 URL 和目标 URL 几乎一样，强制刷新页面以重启 Content Script
-        if (tab.url && tab.url.includes(targetUrl.split('?')[0])) {
+        // 提取核心 URL 进行精准比对，忽略查询参数和锚点，避免出现 facebook.com/ 包含 facebook.com/xxx 的误判
+        const stripUrl = (u) => { try { const url = new URL(u); return url.origin + url.pathname.replace(/\/$/, ''); } catch(e) { return u.split('?')[0].replace(/\/$/, ''); } };
+        if (tab.url && stripUrl(tab.url) === stripUrl(targetUrl)) {
           chrome.tabs.reload(workerTabId);
         } else {
           chrome.tabs.update(workerTabId, { url: targetUrl, active: false });

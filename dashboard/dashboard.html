@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.0.5</span>
+          <span>Pro Studio v1.0.6</span>
         </div>
       </div>
 
@@ -81,18 +81,27 @@
               <p class="subtitle">请输入你需要自动化监控的 FB 贴文完整链接（支持谷歌表格直接复制多行一键粘贴）</p>
             </div>
             <div class="card-body">
-              <textarea id="inputTargetUrls" class="form-textarea" rows="4" placeholder="https://www.facebook.com/permalink.php?story_fbid=...\nhttps://www.facebook.com/pageName/posts/..."></textarea>
+              <div style="position: relative;">
+                <textarea id="inputTargetUrls" class="form-textarea" rows="4" placeholder="https://www.facebook.com/permalink.php?story_fbid=...\nhttps://www.facebook.com/pageName/posts/..."></textarea>
+                <div style="text-align: right; margin-top: 4px;">
+                  <button class="btn btn-danger-outline btn-sm" id="btnClearTargetUrls" style="font-size: 12px; padding: 4px 8px;">🗑️ 清空监控链接</button>
+                </div>
+              </div>
               
               <div class="mt-4">
                 <label class="grid-title">🌟 活跃账号伪装链接 (防封必备)</label>
                 <small class="help-text">插件在扫描贴文之间，会随机访问以下链接，完全模拟真人浏览和滚动，极大降低被检测风险。（一行一个）</small>
-                <textarea id="inputActiveUrls" class="form-textarea mt-2" rows="3" placeholder="https://www.facebook.com/\nhttps://www.facebook.com/reels"></textarea>
+                <div style="position: relative;">
+                  <textarea id="inputActiveUrls" class="form-textarea mt-2" rows="3" placeholder="https://www.facebook.com/\nhttps://www.facebook.com/reels"></textarea>
+                  <div style="text-align: right; margin-top: 4px;">
+                    <button class="btn btn-danger-outline btn-sm" id="btnClearActiveUrls" style="font-size: 12px; padding: 4px 8px;">🗑️ 清空伪装链接</button>
+                  </div>
+                </div>
               </div>
 
               <div class="form-actions mt-3">
                 <div class="btn-group">
                   <button class="btn btn-primary" id="btnSaveUrls">保存全部链接</button>
-                  <button class="btn btn-danger-outline" id="btnClearUrls">🗑️ 一键清空</button>
                 </div>
                 <span class="save-tip" id="tipSaveUrls"></span>
               </div>

@@ -100,7 +100,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const inputTargetUrls = document.getElementById('inputTargetUrls');
   const inputActiveUrls = document.getElementById('inputActiveUrls');
   const btnSaveUrls = document.getElementById('btnSaveUrls');
-  const btnClearUrls = document.getElementById('btnClearUrls');
+  const btnClearTargetUrls = document.getElementById('btnClearTargetUrls');
+  const btnClearActiveUrls = document.getElementById('btnClearActiveUrls');
   const tipSaveUrls = document.getElementById('tipSaveUrls');
 
   async function loadUrls() {
@@ -117,12 +118,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => tipSaveUrls.textContent = '', 3000);
   });
 
-  btnClearUrls.addEventListener('click', async () => {
-    if (confirm("确定要清空所有链接吗？")) {
+  btnClearTargetUrls.addEventListener('click', async () => {
+    if (confirm("确定要清空所有监控贴文链接吗？")) {
       inputTargetUrls.value = '';
+      const activeLines = inputActiveUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
+      await StorageUtil.saveSettings({ targetUrls: [], activeUrls: activeLines });
+      tipSaveUrls.textContent = `✓ 已清空监控贴文！`;
+      setTimeout(() => tipSaveUrls.textContent = '', 3000);
+    }
+  });
+
+  btnClearActiveUrls.addEventListener('click', async () => {
+    if (confirm("确定要清空所有伪装链接吗？")) {
       inputActiveUrls.value = '';
-      await StorageUtil.saveSettings({ targetUrls: [], activeUrls: [] });
-      tipSaveUrls.textContent = `✓ 已清空！`;
+      const targetLines = inputTargetUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
+      await StorageUtil.saveSettings({ targetUrls: targetLines, activeUrls: [] });
+      tipSaveUrls.textContent = `✓ 已清空伪装链接！`;
       setTimeout(() => tipSaveUrls.textContent = '', 3000);
     }
   });
