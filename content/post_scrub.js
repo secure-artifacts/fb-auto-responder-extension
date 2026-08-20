@@ -302,22 +302,27 @@
       const normalizeStr = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const keywords = ['comment', '留言', '评论', 'coment', 'komentar'];
       
-      // 扩大搜索范围：所有带有 aria-label 的元素
-      const buttons = Array.from(document.querySelectorAll('[aria-label]'));
+      // 扩大搜索范围：所有带有 aria-label 的元素, 或者包含 tabindex="0" 的可点击元素
+      const buttons = Array.from(document.querySelectorAll('[aria-label], div[role="button"], span[role="button"], div[tabindex="0"]'));
       
       let commentBtns = buttons.filter(btn => {
         if (!isVisible(btn)) return false;
-        const ariaLabel = normalizeStr(btn.getAttribute('aria-label') || '');
-        if (!ariaLabel) return false;
+        
+        // 提取原生的 aria-label
+        const ariaLabel = (btn.getAttribute('aria-label') || '');
+        // 提取内部所有文本（包括被 Facebook visually-hidden 隐藏的文字，比如 "5 comments"）
+        const textContent = (btn.textContent || '');
+        
+        const combinedStr = normalizeStr(ariaLabel + " " + textContent);
+        if (!combinedStr.trim()) return false;
         
         // 必须包含核心关键词
-        if (!keywords.some(kw => ariaLabel.includes(kw))) return false;
+        if (!keywords.some(kw => combinedStr.includes(kw))) return false;
         
         // 排除回复按钮和发送框本身
-        if (ariaLabel.includes('reply') || ariaLabel.includes('回复') || ariaLabel.includes('responder')) return false;
-        if (ariaLabel.includes('write') || ariaLabel.includes('写') || ariaLabel.includes('escreva')) return false;
+        if (combinedStr.includes('reply') || combinedStr.includes('回复') || combinedStr.includes('responder')) return false;
+        if (combinedStr.includes('write') || combinedStr.includes('写') || combinedStr.includes('escreva')) return false;
         
-        // 确保它是一个可以点击的元素 (通常有 role="button" 或 tag 是 div/span)
         return true;
       });
       

@@ -170,7 +170,11 @@ async function injectButtons() {
 
     if (!actionBar || actionBar.hasAttribute('data-dm-injected')) return;
 
-    // 标记当前贴文互动栏，确保单条贴文绝对只加一个按钮，绝不遗漏也绝重复
+    // 向上寻找一个较大的共同容器（整个贴文），确保一篇贴文里绝对只加一个蓝按钮
+    const postContainer = btnElement.closest('div[role="article"]') || btnElement.closest('div[data-pagelet]') || actionBar.parentElement;
+    if (postContainer && postContainer.querySelector('.fb-auto-dm-btn')) return;
+
+    // 标记当前贴文互动栏
     actionBar.setAttribute('data-dm-injected', 'true');
 
     // 提取贴文链接
