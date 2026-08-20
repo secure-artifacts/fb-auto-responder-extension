@@ -322,10 +322,21 @@
       });
       
       if (commentBtns.length > 0) {
-        // 通常点击第一个可见的评论按钮即可
-        // Reels 的评论按钮通常包含数字，比如 "9 comments"
-        commentBtns[0].click();
-        console.log("[V5.0] 已点击评论按钮:", commentBtns[0].getAttribute('aria-label'));
+        const targetBtn = commentBtns[0];
+        
+        // Facebook React 点击事件可能绑在父级或者子级上，所以我们全都触发一遍
+        const simulateClick = (el) => {
+          if (!el) return;
+          el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+          el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+          el.click();
+        };
+
+        simulateClick(targetBtn);
+        if (targetBtn.firstElementChild) simulateClick(targetBtn.firstElementChild);
+        if (targetBtn.parentElement) simulateClick(targetBtn.parentElement);
+        
+        console.log("[V5.0] 已深入点击评论按钮:", targetBtn.getAttribute('aria-label'));
       } else {
         console.warn("[V5.0] 未能在页面上找到包含评论关键词的按钮，展开可能失败。");
       }

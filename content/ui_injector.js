@@ -194,15 +194,7 @@ async function injectButtons() {
       toggleMonitorStatus(btn, postUrl);
     });
 
-    // 强制把容器设为单行横向 Flex 排版，防止把 Facebook 的分享等按钮挤压折行
-    try {
-      actionBar.style.setProperty('display', 'flex', 'important');
-      actionBar.style.setProperty('flex-direction', 'row', 'important');
-      actionBar.style.setProperty('flex-wrap', 'nowrap', 'important');
-      actionBar.style.setProperty('align-items', 'center', 'important');
-    } catch (e) {}
-
-    // 追加挂载到互动栏末尾
+    // 尊重 Facebook 的原生布局，直接将按钮追加挂载到互动栏末尾
     actionBar.appendChild(btn);
   });
 }
