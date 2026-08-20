@@ -38,6 +38,9 @@
     // 给重新排序留点时间
     await new Promise(r => setTimeout(r, 3000));
 
+    // 展开被折叠的“其他 X 条评论”或“查看更多”
+    await expandAllHiddenComments();
+
     const queue = await buildPriorityQueue();
     await StorageUtil.saveSettings({ statusMessage: `扫描完毕，待私信人数: ${queue.length}` });
     console.log(`[V5.0] 扫描完毕，待私信队列长度: ${queue.length}`);
@@ -243,6 +246,46 @@
   // =========================================================================
   // DOM 与核心注入交互逻辑
   // =========================================================================
+
+  async function expandAllHiddenComments() {
+    console.log("[V5.0] 检查并展开折叠的“其他 X 条评论”...");
+    await StorageUtil.saveSettings({ statusMessage: `检查并展开折叠的评论...` });
+    
+    const maxExpands = 5; 
+    const expandKeywords = ['view more comments', 'see more', '其他', '查看更多', 'ver mais comentários', 'mostrar mais comentários'];
+    
+    for (let i = 0; i < maxExpands; i++) {
+      const buttons = Array.from(document.querySelectorAll('div[role="button"], span[dir="auto"]')).filter(el => {
+        const text = (el.innerText || el.textContent || '').toLowerCase().trim();
+        if (!text) return false;
+        
+        return expandKeywords.some(kw => text.includes(kw)) || /^view\s+\d+\s+more/i.test(text) || /^其他\s*\d+\s*条/i.test(text);
+      });
+      
+      const visibleButtons = buttons.filter(btn => isVisible(btn) && !btn.hasAttribute('data-dm-expanded'));
+      if (visibleButtons.length === 0) break; 
+      
+      let clickedAny = false;
+      for (const btn of visibleButtons) {
+         btn.setAttribute('data-dm-expanded', 'true');
+         
+         const simulateClick = (el) => {
+            el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+            el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+            el.click();
+         };
+         
+         simulateClick(btn);
+         if (btn.parentElement) simulateClick(btn.parentElement);
+         
+         clickedAny = true;
+         console.log("[V5.0] 已点击展开评论按钮:", btn.textContent.trim().substring(0, 20));
+      }
+      
+      if (!clickedAny) break;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
 
   async function ensureNewestCommentSorting() {
     try {
