@@ -22,8 +22,14 @@
   startSingleRun(window.location.href);
 
   async function startSingleRun(targetUrl) {
-    await StorageUtil.saveSettings({ statusMessage: `等待页面加载 (8秒)...` });
-    await new Promise(r => setTimeout(r, 8000)); // Reels 页面较重，等待 8 秒确保页面渲染
+    await StorageUtil.saveSettings({ statusMessage: `等待页面加载 (4秒)...` });
+    await new Promise(r => setTimeout(r, 4000)); // 先等待 4 秒
+
+    // 针对 Reels 或隐藏评论区的页面，自动点击评论按钮展开面板
+    await ensureCommentsPanelOpen();
+
+    await StorageUtil.saveSettings({ statusMessage: `等待评论区渲染 (4秒)...` });
+    await new Promise(r => setTimeout(r, 4000)); // 再等待 4 秒确保渲染
 
     if (checkFacebookEmergencyBrake()) return;
 
@@ -276,6 +282,42 @@
     const rect = elem.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return false;
     return true;
+  }
+
+  async function ensureCommentsPanelOpen() {
+    try {
+      // 检查当前页面是否已经展示了评论区（通过寻找评论框、发送按钮、排序按钮）
+      const hasCommentsArea = document.querySelector('form') || document.querySelector('div[aria-label="写留言"], div[aria-label="Write a comment"]');
+      const sortButtons = Array.from(document.querySelectorAll('div[role="button"], span')).filter(el => {
+        const txt = el.innerText ? el.innerText.trim() : '';
+        return ['最相关', 'Most relevant', '所有留言', 'All comments', 'Newest', '最新'].some(k => txt.includes(k));
+      });
+
+      if (sortButtons.length > 0 || hasCommentsArea) {
+        return; // 已经展开
+      }
+
+      console.log("[V5.0] 未检测到开放的评论区，尝试寻找并点击【评论】按钮以展开面板...");
+      
+      const keywords = ['comment', '留言', '评论', 'comentar', 'komentar'];
+      const buttons = Array.from(document.querySelectorAll('div[role="button"], span[role="button"]'));
+      
+      const commentBtns = buttons.filter(btn => {
+        if (!isVisible(btn)) return false;
+        const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+        // 避开"回复"(reply) 按钮 和 文本输入框
+        if (ariaLabel.includes('reply') || ariaLabel.includes('回复')) return false;
+        if (ariaLabel.includes('write') || ariaLabel.includes('写')) return false;
+        return keywords.some(kw => ariaLabel.includes(kw));
+      });
+      
+      if (commentBtns.length > 0) {
+        commentBtns[0].click();
+        console.log("[V5.0] 已点击评论按钮:", commentBtns[0].getAttribute('aria-label'));
+      }
+    } catch(e) {
+      console.error("[V5.0] 自动展开评论面板失败:", e);
+    }
   }
 
   function checkFacebookEmergencyBrake() {
