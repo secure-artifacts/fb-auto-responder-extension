@@ -299,21 +299,35 @@
 
       console.log("[V5.0] 未检测到开放的评论区，尝试寻找并点击【评论】按钮以展开面板...");
       
-      const keywords = ['comment', '留言', '评论', 'comentar', 'komentar'];
-      const buttons = Array.from(document.querySelectorAll('div[role="button"], span[role="button"]'));
+      const normalizeStr = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const keywords = ['comment', '留言', '评论', 'coment', 'komentar'];
       
-      const commentBtns = buttons.filter(btn => {
+      // 扩大搜索范围：所有带有 aria-label 的元素
+      const buttons = Array.from(document.querySelectorAll('[aria-label]'));
+      
+      let commentBtns = buttons.filter(btn => {
         if (!isVisible(btn)) return false;
-        const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-        // 避开"回复"(reply) 按钮 和 文本输入框
-        if (ariaLabel.includes('reply') || ariaLabel.includes('回复')) return false;
-        if (ariaLabel.includes('write') || ariaLabel.includes('写')) return false;
-        return keywords.some(kw => ariaLabel.includes(kw));
+        const ariaLabel = normalizeStr(btn.getAttribute('aria-label') || '');
+        if (!ariaLabel) return false;
+        
+        // 必须包含核心关键词
+        if (!keywords.some(kw => ariaLabel.includes(kw))) return false;
+        
+        // 排除回复按钮和发送框本身
+        if (ariaLabel.includes('reply') || ariaLabel.includes('回复') || ariaLabel.includes('responder')) return false;
+        if (ariaLabel.includes('write') || ariaLabel.includes('写') || ariaLabel.includes('escreva')) return false;
+        
+        // 确保它是一个可以点击的元素 (通常有 role="button" 或 tag 是 div/span)
+        return true;
       });
       
       if (commentBtns.length > 0) {
+        // 通常点击第一个可见的评论按钮即可
+        // Reels 的评论按钮通常包含数字，比如 "9 comments"
         commentBtns[0].click();
         console.log("[V5.0] 已点击评论按钮:", commentBtns[0].getAttribute('aria-label'));
+      } else {
+        console.warn("[V5.0] 未能在页面上找到包含评论关键词的按钮，展开可能失败。");
       }
     } catch(e) {
       console.error("[V5.0] 自动展开评论面板失败:", e);
