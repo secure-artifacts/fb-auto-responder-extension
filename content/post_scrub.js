@@ -286,46 +286,82 @@
 
   async function ensureCommentsPanelOpen() {
     try {
-      // 检查当前页面是否已经展示了评论区（通过寻找评论框、发送按钮、排序按钮）
-      const hasCommentsArea = document.querySelector('form') || document.querySelector('div[aria-label="写留言"], div[aria-label="Write a comment"]');
+      // 1. 严格判断面板是否已完全展开
+      // 不再仅仅依赖"表单/输入框"来判断，必须看到"排序按钮"或者实质性的回复按钮
       const sortButtons = Array.from(document.querySelectorAll('div[role="button"], span')).filter(el => {
         const txt = el.innerText ? el.innerText.trim() : '';
         return ['最相关', 'Most relevant', '所有留言', 'All comments', 'Newest', '最新'].some(k => txt.includes(k));
       });
+      // 检查是不是有很多评论已经被渲染出来了（比如页面上有多个 '回复'/'Reply' 文字）
+      const replyTexts = Array.from(document.querySelectorAll('span, div')).filter(el => {
+        const t = el.innerText ? el.innerText.trim() : '';
+        return t === '回复' || t === 'Reply' || t === 'Responder';
+      });
 
-      if (sortButtons.length > 0 || hasCommentsArea) {
+      if (sortButtons.length > 0 || replyTexts.length > 3) {
         return; // 已经展开
       }
 
-      console.log("[V5.0] 未检测到开放的评论区，尝试寻找并点击【评论】按钮以展开面板...");
+      console.log("[V5.0] 未检测到完全开放的评论列表，尝试寻找并点击【评论】按钮以展开面板...");
       
       const normalizeStr = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const keywords = ['comment', '留言', '评论', 'coment', 'komentar'];
       
-      // 扩大搜索范围：所有带有 aria-label 的元素, 或者包含 tabindex="0" 的可点击元素
-      const buttons = Array.from(document.querySelectorAll('[aria-label], div[role="button"], span[role="button"], div[tabindex="0"]'));
+      // 提取所有包含 SVG 图像的潜在互动按钮（Reels 右侧的点赞/评论/分享按钮必带 SVG）
+      const allClickables = Array.from(document.querySelectorAll('[aria-label], div[role="button"], span[role="button"], div[tabindex="0"]'))
+        .filter(isVisible)
+        .filter(el => el.querySelector('svg') || el.tagName.toLowerCase() === 'svg');
       
-      let commentBtns = buttons.filter(btn => {
-        if (!isVisible(btn)) return false;
-        
-        // 提取原生的 aria-label
+      let commentBtns = allClickables.filter(btn => {
         const ariaLabel = (btn.getAttribute('aria-label') || '');
-        // 提取内部所有文本（包括被 Facebook visually-hidden 隐藏的文字，比如 "5 comments"）
         const textContent = (btn.textContent || '');
-        
         const combinedStr = normalizeStr(ariaLabel + " " + textContent);
+        
         if (!combinedStr.trim()) return false;
-        
-        // 必须包含核心关键词
         if (!keywords.some(kw => combinedStr.includes(kw))) return false;
-        
-        // 排除回复按钮和发送框本身
         if (combinedStr.includes('reply') || combinedStr.includes('回复') || combinedStr.includes('responder')) return false;
         if (combinedStr.includes('write') || combinedStr.includes('写') || combinedStr.includes('escreva')) return false;
-        
         return true;
       });
       
+      // 2. 拓扑结构推断 (降维打击：如果是无字天书，就找邻居)
+      if (commentBtns.length === 0) {
+        console.log("[V5.0] 文字特征未命中，启动结构拓扑推断 (寻找 Like / Share 的邻居)...");
+        
+        const isShareBtn = (el) => {
+           const str = normalizeStr((el.getAttribute('aria-label') || '') + " " + (el.textContent || ''));
+           return ['share', '分享', 'compartilhar', 'compartir'].some(k => str.includes(k));
+        };
+        const isLikeBtn = (el) => {
+           const str = normalizeStr((el.getAttribute('aria-label') || '') + " " + (el.textContent || ''));
+           return ['like', '赞', '讚', 'curtir', 'me gusta'].some(k => str.includes(k)) && !str.includes('comment') && !str.includes('share');
+        };
+
+        for (let i = 0; i < allClickables.length; i++) {
+           if (isShareBtn(allClickables[i])) {
+              let prev = allClickables[i - 1]; // 分享的上一个通常是评论
+              if (prev && !isLikeBtn(prev)) {
+                 commentBtns.push(prev);
+                 console.log("[V5.0] 拓扑推断成功：通过 Share 按钮定位到其上方的邻居节点作为评论按钮");
+                 break;
+              }
+           }
+        }
+
+        if (commentBtns.length === 0) {
+           for (let i = 0; i < allClickables.length; i++) {
+              if (isLikeBtn(allClickables[i])) {
+                 let next = allClickables[i + 1]; // 点赞的下一个通常是评论
+                 if (next && !isShareBtn(next)) {
+                    commentBtns.push(next);
+                    console.log("[V5.0] 拓扑推断成功：通过 Like 按钮定位到其下方的邻居节点作为评论按钮");
+                    break;
+                 }
+              }
+           }
+        }
+      }
+
       if (commentBtns.length > 0) {
         const targetBtn = commentBtns[0];
         
@@ -341,9 +377,9 @@
         if (targetBtn.firstElementChild) simulateClick(targetBtn.firstElementChild);
         if (targetBtn.parentElement) simulateClick(targetBtn.parentElement);
         
-        console.log("[V5.0] 已深入点击评论按钮:", targetBtn.getAttribute('aria-label'));
+        console.log("[V5.0] 已深入点击目标评论按钮:", targetBtn.getAttribute('aria-label') || targetBtn.textContent.trim().substring(0, 20) || "SVG Icon");
       } else {
-        console.warn("[V5.0] 未能在页面上找到包含评论关键词的按钮，展开可能失败。");
+        console.warn("[V5.0] 未能在页面上找到任何符合特征的按钮，展开大概率失败。");
       }
     } catch(e) {
       console.error("[V5.0] 自动展开评论面板失败:", e);
