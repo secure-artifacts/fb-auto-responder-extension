@@ -140,6 +140,11 @@ function getBestTargetButton(container) {
 }
 
 async function injectButtons() {
+  // 如果短视频已经被点击点开（进入 Reels 沉浸式详情页），则不需要显示监控按钮
+  if (window.location.pathname.includes('/reel/')) {
+    return;
+  }
+
   const settings = await StorageUtil.getSettings();
   const monitoredUrls = settings.targetUrls || [];
 
@@ -198,7 +203,15 @@ async function injectButtons() {
       toggleMonitorStatus(btn, postUrl);
     });
 
-    // 尊重 Facebook 的原生布局，直接将按钮追加挂载到互动栏末尾
+    // 针对时间线贴文，恢复横向 Flex 排版以修复按钮与“查看更多评论”文本重叠的问题
+    try {
+      actionBar.style.setProperty('display', 'flex', 'important');
+      actionBar.style.setProperty('flex-direction', 'row', 'important');
+      actionBar.style.setProperty('flex-wrap', 'nowrap', 'important');
+      actionBar.style.setProperty('align-items', 'center', 'important');
+    } catch (e) {}
+
+    // 挂载到互动栏末尾
     actionBar.appendChild(btn);
   });
 }

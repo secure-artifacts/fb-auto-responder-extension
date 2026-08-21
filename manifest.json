@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FB 智能私信大师",
   "short_name": "FB Auto-Responder",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "全自动监控指定脸书贴文留言，按顺序安全私信用户，极致防封，专为私信营销打造。",
   "icons": {
     "16": "assets/icon16.png",
@@ -12,7 +12,7 @@
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": "assets/icon48.png",
-    "default_title": "FB 智能私信大师 v1.0.15"
+    "default_title": "FB 智能私信大师 v1.0.16"
   },
   "permissions": [
     "storage",
