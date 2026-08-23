@@ -249,7 +249,6 @@
 
   async function expandAllHiddenComments() {
     console.log("[V5.0] 检查并展开折叠的“其他 X 条评论”...");
-    await StorageUtil.saveSettings({ statusMessage: `检查并展开折叠的评论...` });
     
     const maxExpands = 5; 
     const expandKeywords = ['view more comments', 'see more', '其他', '查看更多', 'ver mais comentários', 'mostrar mais comentários'];
@@ -279,7 +278,6 @@
          if (btn.parentElement) simulateClick(btn.parentElement);
          
          clickedAny = true;
-         console.log("[V5.0] 已点击展开评论按钮:", btn.textContent.trim().substring(0, 20));
       }
       
       if (!clickedAny) break;
@@ -480,9 +478,6 @@
   function isPageAuthorComment(node) {
     const text = node.innerText || "";
     if (text.includes("· 作者") || text.includes("· Author")) return true;
-    const hasSendMsg = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan', 'Magpadala ng Mensahe'].some(k => text.includes(k) || text.includes(k.toUpperCase()));
-    const hasReply = ['回复', '回覆', 'Reply', 'Responder', 'Répondre', 'Balas'].some(k => text.includes(k) || text.includes(k.toUpperCase()));
-    if (hasReply && !hasSendMsg) return true;
     return false;
   }
 
@@ -521,25 +516,35 @@
   }
 
   function findSendMessageBtn(node) {
-    const keywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan', 'Magpadala ng Mensahe'];
-    const els = Array.from(node.querySelectorAll('div[role="button"], a[role="link"], span, a'));
+    const keywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message', 'kirim pesan', 'magpadala ng mensahe'];
+    const els = Array.from(node.querySelectorAll('div[role="button"], a[role="link"], span[role="button"], div[tabindex="0"]'));
+    
+    const normalizeStr = (str) => (str || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
     for (const el of els) {
-      const txt = el.innerText ? el.innerText.trim() : '';
-      if (keywords.includes(txt) || keywords.includes(txt.toUpperCase())) return el;
+      const txt = normalizeStr(el.textContent);
+      const label = normalizeStr(el.getAttribute('aria-label'));
+      
+      if (keywords.some(k => txt === k || txt.includes(k) || label === k || label.includes(k))) {
+         if (el.tagName === 'A' && el.href && !el.href.includes('#')) continue; 
+         return el;
+      }
     }
-    for (const el of els) {
-      const label = el.getAttribute('aria-label') || '';
-      if (keywords.some(k => label === k || label.includes(k + ' '))) return el;
-    }
-    const replyBtn = findButtonByText(node, ['回复', '回覆', 'Reply', 'Responder', 'Répondre', 'Balas']);
+
+    const replyBtn = els.find(el => {
+       const t = normalizeStr(el.textContent);
+       return ['回复', '回覆', 'reply', 'responder', 'répondre', 'balas'].some(k => t === k);
+    });
+    
     if (replyBtn && replyBtn.parentElement) {
       const siblings = Array.from(replyBtn.parentElement.children);
       const idx = siblings.indexOf(replyBtn);
       for (let i = idx + 1; i < siblings.length; i++) {
-        const txt = siblings[i].innerText ? siblings[i].innerText.trim() : '';
-        if (keywords.some(k => txt === k)) return siblings[i];
+        const txt = normalizeStr(siblings[i].textContent);
+        if (keywords.some(k => txt.includes(k))) return siblings[i];
       }
     }
+    
     return null;
   }
 
