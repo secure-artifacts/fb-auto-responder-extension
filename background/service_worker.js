@@ -42,6 +42,20 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     console.log("收到 PAGE_FINISHED，准备切换下一条贴文");
     scheduleNextUrl();
     sendResponse({ status: "ACK" });
+  } else if (req.action === "SYNC_GOOGLE_SHEETS") {
+    syncToGoogleSheets(req.payload).then(res => {
+      sendResponse(res);
+    }).catch(err => {
+      sendResponse({ success: false, error: err.message });
+    });
+    return true; // 异步响应
+  } else if (req.action === "TEST_GOOGLE_SHEET") {
+    testGoogleSheetConnection(req.webhookUrl, req.sheetName).then(res => {
+      sendResponse(res);
+    }).catch(err => {
+      sendResponse({ success: false, error: err.message });
+    });
+    return true; // 异步响应
   }
   return true;
 });
@@ -214,3 +228,83 @@ async function triggerEmergencyBrake(reason) {
     console.error("triggerEmergencyBrake error:", err);
   }
 }
+
+// ── 谷歌表格同步引擎 ──────────────────────────────────────────────────────
+async function syncToGoogleSheets(rowPayload) {
+  try {
+    const sheets = await StorageUtil.getGoogleSheets();
+    const enabledSheets = sheets.filter(s => s.enabled && s.webhookUrl);
+    if (enabledSheets.length === 0) return { success: true, count: 0 };
+
+    console.log(`[Google Sheets] 开始向 ${enabledSheets.length} 个启用表格推送数据...`);
+    const promises = enabledSheets.map(async (sheet) => {
+      const bodyData = {
+        sheetName: sheet.sheetName || "Sheet1",
+        row: rowPayload
+      };
+      try {
+        const resp = await fetch(sheet.webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(bodyData)
+        });
+        const resText = await resp.text();
+        console.log(`[Google Sheets] 表格 [${sheet.name}] 同步成功:`, resText);
+        return { id: sheet.id, success: true, response: resText };
+      } catch (err) {
+        console.error(`[Google Sheets] 表格 [${sheet.name}] 同步失败:`, err);
+        return { id: sheet.id, success: false, error: err.message };
+      }
+    });
+
+    const results = await Promise.all(promises);
+    return { success: true, count: enabledSheets.length, results };
+  } catch (e) {
+    console.error("[Google Sheets] syncToGoogleSheets 发生异常:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function testGoogleSheetConnection(webhookUrl, sheetName) {
+  try {
+    if (!webhookUrl) throw new Error("缺少 Webhook 链接");
+    const now = new Date();
+    const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const hourStr = String(now.getHours());
+
+    const testRow = [
+      "100088889999000",             // A: FB id
+      "测试用户_TestUser",           // B: 姓名
+      "连通性测试 | 测试通过",       // C: 自定义字段
+      "FB自动私信插件 (测试)",       // D: 来源
+      "测试连接",                    // E: 标签
+      timeStr,                       // F: 订阅时间
+      "",                            // G: 性别
+      "https://facebook.com/test",   // H: 最新贴文
+      "https://facebook.com/test",   // I: 评论贴文
+      "这是一条来自插件的连通性测试数据！", // J: 评论内容
+      dateStr,                       // K: 日期
+      hourStr,                       // L: 时间点
+      "page_test_123",               // M: 专页id
+      timeStr                        // N: 创建时间
+    ];
+
+    const bodyData = {
+      sheetName: sheetName || "Sheet1",
+      row: testRow
+    };
+
+    const resp = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(bodyData)
+    });
+
+    const resText = await resp.text();
+    return { success: true, response: resText };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+

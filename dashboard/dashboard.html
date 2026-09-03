@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.0.17</span>
+          <span>Pro Studio v1.0.18</span>
         </div>
       </div>
 
@@ -30,6 +30,10 @@
         <button class="nav-item" data-tab="tab-antiban">
           <span class="nav-icon">🛡️</span>
           <span>防封与去重策略</span>
+        </button>
+        <button class="nav-item" data-tab="tab-sheets">
+          <span class="nav-icon">📈</span>
+          <span>谷歌表格同步</span>
         </button>
         <button class="nav-item" data-tab="tab-logs">
           <span class="nav-icon">📊</span>
@@ -205,6 +209,86 @@
           </div>
         </section>
 
+        <!-- TAB: 谷歌表格同步 -->
+        <section class="tab-panel" id="tab-sheets">
+          <div class="card">
+            <div class="card-header flex-between">
+              <div>
+                <h3>📈 谷歌在线表格（Google Sheets）同步中心</h3>
+                <p class="subtitle">可无限添加多个 Google 表格连接。插件抓取到留言线索后，将实时多线程追加写入到已启用的表格中。</p>
+              </div>
+              <button class="btn btn-primary" id="btnOpenAddSheetModal">+ 添加新表格连接</button>
+            </div>
+            <div class="card-body">
+              <!-- 新手指南与脚本代码折叠卡片 -->
+              <div class="sheets-guide-box">
+                <div class="guide-header" id="guideHeader">
+                  <span>💡 <b>如何获取 Google 表格接收链接 (Apps Script Webhook)？</b>（点击展开/折叠简易教程）</span>
+                  <span class="guide-arrow" id="guideArrow">▼</span>
+                </div>
+                <div class="guide-content" id="guideContent">
+                  <ol class="guide-steps">
+                    <li>新建或打开你的任意 Google 表格，点击顶部菜单的 <code>扩展程序 (Extensions)</code> ➔ <code>Apps Script</code>。</li>
+                    <li>将下方代码框中的脚本全选覆盖粘贴到编辑器中，点击顶部的 💾 <b>保存图标</b>。</li>
+                    <li>点击右上角的 <b>部署 (Deploy)</b> ➔ <b>新建部署 (New deployment)</b>。</li>
+                    <li>点击齿轮图标选择 <b>Web 应用 (Web app)</b>，配置：
+                      <ul>
+                        <li><b>说明</b>：可留空或输入 <code>FB线索接收</code></li>
+                        <li><b>执行身份 (Execute as)</b>：<code>我 (Me)</code></li>
+                        <li><b>谁可以访问 (Who has access)</b>：选择 <code>任何人 (Anyone)</code>（⚠️ 关键！否则插件无法免密提交数据）</li>
+                      </ul>
+                    </li>
+                    <li>点击 <b>部署 (Deploy)</b>，在弹窗中授予权限，复制生成的 <b>Web 应用网址 (Web App URL)</b>，填入下方表格配置即可！</li>
+                  </ol>
+                  <div class="code-container">
+                    <div class="code-header">
+                      <span>Google Apps Script 接收端通用脚本</span>
+                      <button class="btn btn-secondary btn-sm" id="btnCopyGasCode">📋 一键复制脚本代码</button>
+                    </div>
+                    <pre class="code-block" id="gasCodeBlock"><code>function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var sheetName = data.sheetName || "Sheet1";
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName) || ss.getSheets()[0];
+    
+    // 如果表格为空，自动初始化 14 列标准表头
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "FB id", "姓名", "自定义字段", "来源", "标签", 
+        "订阅时间", "性别", "最新贴文", "评论贴文", 
+        "评论内容", "日期", "时间点", "专页id", "创建时间"
+      ]);
+    }
+    
+    // 写入当前线索数据行
+    sheet.appendRow(data.row);
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "数据已写入" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}</code></pre>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 已配置表格列表 -->
+              <div class="sheets-list-wrapper">
+                <div class="sheets-list-header">
+                  <h4>已配置的目标表格列表 (<span id="sheetsCount">0</span>)</h4>
+                  <span class="sheets-tip">支持单独开关任一表格，或点击“测试发送”实时验证连通性</span>
+                </div>
+                <div class="sheets-list" id="sheetsListContainer">
+                  <!-- 动态渲染各表格卡片 -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- TAB 4: 运行日志与导出 -->
         <section class="tab-panel" id="tab-logs">
           <div class="card">
@@ -337,6 +421,44 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="btnModalCancel">取消</button>
         <button class="btn btn-primary" id="btnModalSave">保存规则</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 表格配置 Modal 模态框 -->
+  <div class="modal" id="sheetModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="sheetModalTitle">添加 Google 表格连接</h3>
+        <button class="modal-close" id="btnSheetModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="sheetConfigId">
+        <div class="form-group">
+          <label>表格备注名称: <span class="text-danger">*</span></label>
+          <input type="text" id="sheetConfigName" class="form-input" placeholder="例: 主推产品线客资汇总表">
+        </div>
+        <div class="form-group">
+          <label>Google Apps Script Webhook 链接: <span class="text-danger">*</span></label>
+          <input type="url" id="sheetConfigUrl" class="form-input" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
+          <small class="help-text">填入部署为 Web 应用后生成的专属 Exec 网址</small>
+        </div>
+        <div class="form-group">
+          <label>工作表名称 (Sheet Name):</label>
+          <input type="text" id="sheetConfigTabName" class="form-input" placeholder="Sheet1 (默认填入 Sheet1)">
+          <small class="help-text">Google 表格底部的标签名称，默认为 Sheet1</small>
+        </div>
+        <div class="form-group flex-row-align">
+          <label class="switch-label">
+            <input type="checkbox" id="sheetConfigEnabled" checked>
+            <span class="switch-slider"></span>
+          </label>
+          <span class="switch-text">启用该表格自动同步</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnSheetModalCancel">取消</button>
+        <button class="btn btn-primary" id="btnSheetModalSave">保存配置</button>
       </div>
     </div>
   </div>

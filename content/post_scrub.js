@@ -232,6 +232,61 @@
         level: dmSentSuccess ? "info" : "error"
       });
 
+      // 异步分发至所有启用的 Google 表格 (14列标准字段对齐)
+      try {
+        const now = new Date();
+        const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const hourStr = String(now.getHours());
+
+        let fbId = "";
+        if (task.profileLink) {
+          try {
+            const urlObj = new URL(task.profileLink);
+            if (urlObj.searchParams.get('id')) {
+              fbId = urlObj.searchParams.get('id');
+            } else {
+              const parts = urlObj.pathname.split('/').filter(Boolean);
+              if (parts.length > 0) fbId = parts[0];
+            }
+          } catch(e) {
+            fbId = task.profileLink;
+          }
+        }
+
+        let pageId = "";
+        try {
+          const postUrlObj = new URL(targetUrl || window.location.href);
+          const postParts = postUrlObj.pathname.split('/').filter(Boolean);
+          if (postParts.length > 0 && postParts[0] !== 'reel' && postParts[0] !== 'watch' && postParts[0] !== 'groups') {
+            pageId = postParts[0];
+          }
+        } catch(e) {}
+
+        const rowData = [
+          fbId,                                          // A: FB id
+          task.userName,                                 // B: 姓名
+          "",                                            // C: 自定义字段 (前台留言无地理位置)
+          "FB自动监控插件",                              // D: 来源
+          task.matchedObj.rule.name || task.matchedObj.matchedKeyword, // E: 标签
+          timeStr,                                       // F: 订阅时间
+          "",                                            // G: 性别
+          targetUrl || window.location.href,             // H: 最新贴文
+          targetUrl || window.location.href,             // I: 评论贴文
+          task.commentText || "",                        // J: 评论内容
+          dateStr,                                       // K: 日期
+          hourStr,                                       // L: 时间点
+          pageId,                                        // M: 专页id
+          timeStr                                        // N: 创建时间
+        ];
+
+        chrome.runtime.sendMessage({ action: "SYNC_GOOGLE_SHEETS", payload: rowData }, () => {
+          if (chrome.runtime.lastError) { /* ignore */ }
+        });
+      } catch(e) {
+        console.warn("[Google Sheets Sync] 异常:", e);
+      }
+
       // 如果不是最后一个，等待自定义的间隔时间
       if (i < queue.length - 1) {
         await StorageUtil.saveSettings({ statusMessage: `等待 ${settings.dmIntervalSeconds} 秒后发送下一个...` });

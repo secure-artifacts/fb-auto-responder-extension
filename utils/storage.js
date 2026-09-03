@@ -176,6 +176,20 @@ const StorageUtil = {
     return new Promise((resolve) => {
       chrome.storage.local.set({ logs: [] }, () => resolve([]));
     });
+  },
+
+  async getGoogleSheets() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['googleSheets'], (res) => {
+        resolve(res.googleSheets || []);
+      });
+    });
+  },
+
+  async saveGoogleSheets(googleSheets) {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ googleSheets }, () => resolve(googleSheets));
+    });
   }
 };
 

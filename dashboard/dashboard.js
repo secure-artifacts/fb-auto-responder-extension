@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'tab-urls': '目标贴文管理',
     'tab-rules': '关键词与回复规则',
     'tab-antiban': '防封与去重策略',
+    'tab-sheets': '谷歌在线表格同步',
     'tab-logs': '运行日志与导出',
     'tab-backup': '配置导入与备份'
   };
@@ -23,6 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById(targetTab).classList.add('active');
       pageTitle.textContent = tabTitles[targetTab] || '控制台';
 
+      if (targetTab === 'tab-sheets') renderGoogleSheets();
       if (targetTab === 'tab-logs') renderLogs();
       if (targetTab === 'tab-urls') loadUrls();
     });
@@ -605,7 +607,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnExportConfig.addEventListener('click', async () => {
     const settings = await StorageUtil.getSettings();
     const rules = await StorageUtil.getRules();
-    const backupData = { settings, rules, exportDate: new Date().toISOString() };
+    const googleSheets = await StorageUtil.getGoogleSheets();
+    const backupData = { settings, rules, googleSheets, exportDate: new Date().toISOString() };
 
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -627,10 +630,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const data = JSON.parse(evt.target.result);
         if (data.settings) await StorageUtil.saveSettings(data.settings);
         if (data.rules) await StorageUtil.saveRules(data.rules);
-        alert("✓ 配置文件导入成功！规则和参数已更新。");
+        if (data.googleSheets) await StorageUtil.saveGoogleSheets(data.googleSheets);
+        alert("✓ 配置文件导入成功！规则、参数与谷歌表格配置已更新。");
         loadUrls();
         renderRules();
         loadAntibanSettings();
+        renderGoogleSheets();
       } catch (err) {
         alert("配置文件格式错误，导入失败！");
       }
@@ -638,10 +643,249 @@ document.addEventListener('DOMContentLoaded', async () => {
     reader.readAsText(file);
   });
 
+  // ==================== TAB: 谷歌表格同步 ====================
+  const btnOpenAddSheetModal = document.getElementById('btnOpenAddSheetModal');
+  const sheetModal = document.getElementById('sheetModal');
+  const btnSheetModalClose = document.getElementById('btnSheetModalClose');
+  const btnSheetModalCancel = document.getElementById('btnSheetModalCancel');
+  const btnSheetModalSave = document.getElementById('btnSheetModalSave');
+  const sheetModalTitle = document.getElementById('sheetModalTitle');
+  const sheetConfigId = document.getElementById('sheetConfigId');
+  const sheetConfigName = document.getElementById('sheetConfigName');
+  const sheetConfigUrl = document.getElementById('sheetConfigUrl');
+  const sheetConfigTabName = document.getElementById('sheetConfigTabName');
+  const sheetConfigEnabled = document.getElementById('sheetConfigEnabled');
+  const sheetsListContainer = document.getElementById('sheetsListContainer');
+  const sheetsCount = document.getElementById('sheetsCount');
+  const guideHeader = document.getElementById('guideHeader');
+  const guideContent = document.getElementById('guideContent');
+  const guideArrow = document.getElementById('guideArrow');
+  const btnCopyGasCode = document.getElementById('btnCopyGasCode');
+  const gasCodeBlock = document.getElementById('gasCodeBlock');
+
+  // 折叠教程
+  if (guideHeader) {
+    guideHeader.addEventListener('click', () => {
+      const isVisible = guideContent.style.display === 'block';
+      guideContent.style.display = isVisible ? 'none' : 'block';
+      guideArrow.textContent = isVisible ? '▼' : '▲';
+    });
+  }
+
+  // 复制 GAS 代码
+  if (btnCopyGasCode && gasCodeBlock) {
+    btnCopyGasCode.addEventListener('click', () => {
+      const codeText = gasCodeBlock.innerText;
+      navigator.clipboard.writeText(codeText).then(() => {
+        btnCopyGasCode.textContent = "✓ 已复制到剪贴板！";
+        setTimeout(() => {
+          btnCopyGasCode.textContent = "📋 一键复制脚本代码";
+        }, 2500);
+      });
+    });
+  }
+
+  // 打开添加弹窗
+  if (btnOpenAddSheetModal) {
+    btnOpenAddSheetModal.addEventListener('click', () => {
+      sheetModalTitle.textContent = "添加 Google 表格连接";
+      sheetConfigId.value = "";
+      sheetConfigName.value = "";
+      sheetConfigUrl.value = "";
+      sheetConfigTabName.value = "Sheet1";
+      sheetConfigEnabled.checked = true;
+      sheetModal.classList.add('active');
+    });
+  }
+
+  function closeSheetModal() {
+    sheetModal.classList.remove('active');
+  }
+
+  if (btnSheetModalClose) btnSheetModalClose.addEventListener('click', closeSheetModal);
+  if (btnSheetModalCancel) btnSheetModalCancel.addEventListener('click', closeSheetModal);
+
+  // 保存表格配置
+  if (btnSheetModalSave) {
+    btnSheetModalSave.addEventListener('click', async () => {
+      const name = sheetConfigName.value.trim();
+      const url = sheetConfigUrl.value.trim();
+      const tabName = sheetConfigTabName.value.trim() || "Sheet1";
+      const enabled = sheetConfigEnabled.checked;
+      const id = sheetConfigId.value;
+
+      if (!name) {
+        alert("请输入表格备注名称！");
+        return;
+      }
+      if (!url) {
+        alert("请输入 Google Apps Script Webhook 链接！");
+        return;
+      }
+      if (!url.startsWith("https://script.google.com/")) {
+        if (!confirm("提示：该链接似乎不是标准的 Google Apps Script 网址 (通常以 https://script.google.com/ 开头)，确定要保存吗？")) {
+          return;
+        }
+      }
+
+      let sheets = await StorageUtil.getGoogleSheets();
+      if (id) {
+        // 编辑现有表格
+        const idx = sheets.findIndex(s => s.id === id);
+        if (idx !== -1) {
+          sheets[idx] = { ...sheets[idx], name, webhookUrl: url, sheetName: tabName, enabled };
+        }
+      } else {
+        // 新增表格 (无限添加)
+        sheets.push({
+          id: "sheet_" + Date.now() + "_" + Math.floor(Math.random()*1000),
+          name,
+          webhookUrl: url,
+          sheetName: tabName,
+          enabled,
+          createdAt: Date.now()
+        });
+      }
+
+      await StorageUtil.saveGoogleSheets(sheets);
+      closeSheetModal();
+      renderGoogleSheets();
+    });
+  }
+
+  // 渲染表格列表
+  async function renderGoogleSheets() {
+    const sheets = await StorageUtil.getGoogleSheets();
+    if (sheetsCount) sheetsCount.textContent = sheets.length;
+    if (!sheetsListContainer) return;
+
+    if (sheets.length === 0) {
+      sheetsListContainer.innerHTML = `
+        <div class="empty-sheets-box">
+          <span class="empty-icon">📑</span>
+          <h4>尚未添加任何 Google 表格连接</h4>
+          <p>点击上方“+ 添加新表格连接”按钮，按照新手教程配置你的第一个在线表格。</p>
+        </div>
+      `;
+      return;
+    }
+
+    sheetsListContainer.innerHTML = sheets.map(sheet => `
+      <div class="sheet-card ${sheet.enabled ? '' : 'disabled'}" data-id="${sheet.id}">
+        <div class="sheet-card-info">
+          <div class="sheet-card-title-row">
+            <h4 class="sheet-card-title">${escapeHtml(sheet.name)}</h4>
+            <span class="sheet-status-badge ${sheet.enabled ? 'active' : 'inactive'}">
+              ${sheet.enabled ? '🟢 正在同步' : '⚪ 已暂停'}
+            </span>
+          </div>
+          <div class="sheet-card-meta">
+            <span class="meta-item"><b>工作表:</b> <code>${escapeHtml(sheet.sheetName || 'Sheet1')}</code></span>
+            <span class="meta-item text-truncate" title="${escapeHtml(sheet.webhookUrl)}"><b>Webhook 链接:</b> ${escapeHtml(sheet.webhookUrl)}</span>
+          </div>
+        </div>
+        <div class="sheet-card-actions">
+          <button class="btn btn-sm btn-info btn-test-sheet" data-id="${sheet.id}" data-url="${escapeHtml(sheet.webhookUrl)}" data-sheet="${escapeHtml(sheet.sheetName || 'Sheet1')}">
+            ⚡ 测试发送
+          </button>
+          <button class="btn btn-sm btn-secondary btn-edit-sheet" data-id="${sheet.id}">
+            ✏️ 编辑
+          </button>
+          <button class="btn btn-sm ${sheet.enabled ? 'btn-warning' : 'btn-success'} btn-toggle-sheet" data-id="${sheet.id}">
+            ${sheet.enabled ? '⏸ 暂停' : '▶ 启用'}
+          </button>
+          <button class="btn btn-sm btn-danger btn-delete-sheet" data-id="${sheet.id}">
+            🗑️ 删除
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    // 绑定事件
+    sheetsListContainer.querySelectorAll('.btn-toggle-sheet').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        let sheets = await StorageUtil.getGoogleSheets();
+        const target = sheets.find(s => s.id === id);
+        if (target) {
+          target.enabled = !target.enabled;
+          await StorageUtil.saveGoogleSheets(sheets);
+          renderGoogleSheets();
+        }
+      });
+    });
+
+    sheetsListContainer.querySelectorAll('.btn-edit-sheet').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        const sheets = await StorageUtil.getGoogleSheets();
+        const target = sheets.find(s => s.id === id);
+        if (target) {
+          sheetModalTitle.textContent = "编辑 Google 表格连接";
+          sheetConfigId.value = target.id;
+          sheetConfigName.value = target.name;
+          sheetConfigUrl.value = target.webhookUrl;
+          sheetConfigTabName.value = target.sheetName || "Sheet1";
+          sheetConfigEnabled.checked = target.enabled;
+          sheetModal.classList.add('active');
+        }
+      });
+    });
+
+    sheetsListContainer.querySelectorAll('.btn-delete-sheet').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        if (confirm("确定要删除这个 Google 表格连接吗？")) {
+          let sheets = await StorageUtil.getGoogleSheets();
+          sheets = sheets.filter(s => s.id !== id);
+          await StorageUtil.saveGoogleSheets(sheets);
+          renderGoogleSheets();
+        }
+      });
+    });
+
+    sheetsListContainer.querySelectorAll('.btn-test-sheet').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const webhookUrl = btn.getAttribute('data-url');
+        const sheetName = btn.getAttribute('data-sheet');
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = "⏳ 正在发送测试行...";
+
+        chrome.runtime.sendMessage({
+          action: "TEST_GOOGLE_SHEET",
+          webhookUrl,
+          sheetName
+        }, (res) => {
+          btn.disabled = false;
+          btn.innerHTML = origText;
+          if (chrome.runtime.lastError) {
+            alert("测试请求失败: " + chrome.runtime.lastError.message);
+          } else if (res && res.success) {
+            alert("🎉 测试成功！已向你的 Google 表格成功写入一行测试数据。\n请前往表格查看是否已生成 14 列完整表头与测试记录。");
+          } else {
+            alert("❌ 测试写入失败，原因: " + (res ? res.error : "未知错误") + "\n\n排查建议：\n1. 请检查 Webhook 链接是否完整正确；\n2. 部署时【谁可以访问 (Who has access)】必须设置为【任何人 (Anyone)】！");
+          }
+        });
+      });
+    });
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   // 初次加载数据
   loadUrls();
   renderRules();
   loadAntibanSettings();
+  renderGoogleSheets();
   renderLogs();
   updateStatusIndicator();
 });
