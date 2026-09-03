@@ -46,7 +46,7 @@
 
       const userName = targetNotif.userName || "通知用户";
       await StorageUtil.saveSettings({
-        statusMessage: `⚡ 捕获到来自 [${userName}] 的最新评论通知，正在跳转处理...`
+        statusMessage: `⚡ 捕获到来自 [${userName}] 的最新评论通知，正在展开处理...`
       });
 
       console.log(`[Notification Monitor] 点击目标通知: ${targetNotif.text.substring(0, 40)}...`);
@@ -58,24 +58,53 @@
         sessionClickedNotifs.delete(targetNotif.notifKey);
       }, 60000);
 
-      // 第一重手段：仿真人类点击目标 <a> 链接及内部子元素
+      // 触发仿真人类点击目标超链接及其内部元素
       simulateHumanClick(targetNotif.linkElement);
       if (targetNotif.linkElement.firstElementChild) {
         simulateHumanClick(targetNotif.linkElement.firstElementChild);
       }
 
-      // 第二重保障：若 Facebook React 未触发内部路由跳转，1 秒后直接通过 location.href 强制直达
-      setTimeout(() => {
-        if (window.location.pathname.startsWith('/notifications') && targetNotif.targetUrl) {
-          console.log("[Notification Monitor] 仿真点击未跳转，启动原生强制导航直达:", targetNotif.targetUrl);
-          window.location.href = targetNotif.targetUrl;
+      // 等待 Reels/贴文弹窗浮层展开或页面跳转
+      let postOpened = false;
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 600));
+        if (document.querySelector('div[role="dialog"]') || 
+            document.querySelector('div[data-pagelet="Reels"]') || 
+            document.querySelector('div[aria-label*="Reel"]') ||
+            document.querySelector('form[role="presentation"]') ||
+            !window.location.pathname.startsWith('/notifications')) {
+          postOpened = true;
+          break;
         }
-      }, 1000);
+      }
 
-      // 重置锁，防止极端异常卡死
-      setTimeout(() => {
-        isProcessingNotification = false;
-      }, 8000);
+      if (postOpened) {
+        console.log("[Notification Monitor] 检测到贴文/Reels 评论区已成功展开，调用私信引擎扫描...");
+        if (window.FB_SCRUBBER && typeof window.FB_SCRUBBER.startSingleRun === 'function') {
+          await window.FB_SCRUBBER.startSingleRun(targetNotif.targetUrl || window.location.href);
+        }
+
+        // 处理完成后，如果是通知页浮层，关闭该浮层返回通知列表
+        if (window.location.pathname.startsWith('/notifications')) {
+          closeCurrentOverlay();
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      } else {
+        // 如果 6 秒后仍未展开任何弹窗，强制通过 location.href 跳转
+        if (window.location.pathname.startsWith('/notifications') && targetNotif.targetUrl) {
+          console.log("[Notification Monitor] 弹窗未展开，启动原生强制直达:", targetNotif.targetUrl);
+          window.location.href = targetNotif.targetUrl;
+          return;
+        }
+      }
+
+      isProcessingNotification = false;
+      // 等待自定义的通知检查间隔后继续扫描下一条
+      const intervalSec = Math.max(3, settings.notificationCheckInterval || 5);
+      await StorageUtil.saveSettings({
+        statusMessage: `当前通知已处理，${intervalSec} 秒后检索下一条...`
+      });
+      setTimeout(checkAndRun, intervalSec * 1000);
       return;
     }
 
@@ -89,6 +118,17 @@
     setTimeout(checkAndRun, intervalSec * 1000);
   }
 
+  function closeCurrentOverlay() {
+    console.log("[Notification Monitor] 正在关闭当前 Reels/贴文弹窗浮层...");
+    const closeBtn = document.querySelector('div[aria-label="关闭"], div[aria-label="Close"], svg[aria-label="关闭"], button[aria-label="关闭"], div[role="button"][aria-label*="close" i]');
+    if (closeBtn) {
+      closeBtn.click();
+    } else {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+  }
+
   // 尝试点击切换【未读】标签
   async function trySwitchToUnreadTab() {
     try {
@@ -99,7 +139,6 @@
       });
 
       if (unreadBtn && !unreadBtn.getAttribute('aria-selected')) {
-        // 如果未读按钮存在且当前未处于选中状态，点击它
         unreadBtn.click();
         await new Promise(r => setTimeout(r, 1000));
       }

@@ -8,7 +8,10 @@
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  // 如果当前在通知页面，由专属的 notification_monitor.js 接管，此处直接退出
+  // 暴露全局接口供 notification_monitor.js 在通知页弹窗内调用
+  window.FB_SCRUBBER = { startSingleRun };
+
+  // 如果当前在通知页面，默认不主动执行页面扫描（由 notification_monitor 点击打开浮层后按需调用）
   if (window.location.pathname.startsWith('/notifications')) {
     return;
   }
@@ -60,6 +63,10 @@
   }
 
   function finishPageAndNext() {
+    if (window.location.pathname.startsWith('/notifications')) {
+      console.log("[V5.0] 通知弹窗处理完毕，无需触发整页切换");
+      return;
+    }
     console.log("[V5.0] 当前页面处理完毕，通知 Service Worker 切换...");
     chrome.runtime.sendMessage({ action: "PAGE_FINISHED" });
   }
@@ -552,13 +559,14 @@
   }
 
   function findMatchingRule(commentText, rules) {
-    const textLower = commentText.toLowerCase();
+    const normalize = (s) => (s || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const textNorm = normalize(commentText);
     for (const r of rules) {
       if (!r.keywords || r.keywords.length === 0) continue;
       for (const kw of r.keywords) {
-        const kwLower = kw.trim().toLowerCase();
-        if (!kwLower) continue;
-        if (r.matchType === 'exact' ? textLower === kwLower : textLower.includes(kwLower)) {
+        const kwNorm = normalize(kw);
+        if (!kwNorm) continue;
+        if (r.matchType === 'exact' ? textNorm === kwNorm : textNorm.includes(kwNorm)) {
           return { rule: r, matchedKeyword: kw };
         }
       }
