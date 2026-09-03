@@ -12,6 +12,7 @@
   console.log("[Notification Monitor] 已加载，准备监听全主页通知流...");
 
   let isProcessingNotification = false;
+  const sessionClickedNotifs = new Set();
 
   async function checkAndRun() {
     const settings = await StorageUtil.getSettings();
@@ -49,19 +50,32 @@
       });
 
       console.log(`[Notification Monitor] 点击目标通知: ${targetNotif.text.substring(0, 40)}...`);
+      console.log(`[Notification Monitor] 目标URL: ${targetNotif.targetUrl}`);
 
-      // 记录已处理标识，防止同一通知重复点击
-      if (targetNotif.notifKey) {
-        await StorageUtil.markCommentProcessed("notif_" + targetNotif.notifKey);
+      // 会话级去重，60秒内不重复点击相同通知
+      sessionClickedNotifs.add(targetNotif.notifKey);
+      setTimeout(() => {
+        sessionClickedNotifs.delete(targetNotif.notifKey);
+      }, 60000);
+
+      // 第一重手段：仿真人类点击目标 <a> 链接及内部子元素
+      simulateHumanClick(targetNotif.linkElement);
+      if (targetNotif.linkElement.firstElementChild) {
+        simulateHumanClick(targetNotif.linkElement.firstElementChild);
       }
 
-      // 触发人类仿真点击
-      simulateHumanClick(targetNotif.element);
+      // 第二重保障：若 Facebook React 未触发内部路由跳转，1 秒后直接通过 location.href 强制直达
+      setTimeout(() => {
+        if (window.location.pathname.startsWith('/notifications') && targetNotif.targetUrl) {
+          console.log("[Notification Monitor] 仿真点击未跳转，启动原生强制导航直达:", targetNotif.targetUrl);
+          window.location.href = targetNotif.targetUrl;
+        }
+      }, 1000);
 
-      // 给页面一点时间完成跳转/展开，如果超时未跳转，重置状态
+      // 重置锁，防止极端异常卡死
       setTimeout(() => {
         isProcessingNotification = false;
-      }, 10000);
+      }, 8000);
       return;
     }
 
@@ -96,11 +110,10 @@
 
   // 筛选出符合规则的评论通知
   async function findEligibleCommentNotifications(settings) {
-    const candidateNodes = Array.from(document.querySelectorAll('a[href*="notif_id"], div[role="row"], div[role="listitem"], a[role="link"]'));
+    const candidateNodes = Array.from(document.querySelectorAll('a[href*="notif_id"], a[role="link"], div[role="row"], div[role="listitem"]'));
     const commentKeywords = ['评论了', 'commented on', 'comentou', 'ha comentado', 'ha fatto un commento'];
     const excludeKeywords = ['赞了', 'liked', 'curtiu', '关注', 'followed', 'seguindo', '发了消息', 'sent a message', '播放', 'views', 'visualizações'];
 
-    const processedComments = await StorageUtil.getProcessedComments();
     const eligible = [];
 
     for (const node of candidateNodes) {
@@ -115,9 +128,15 @@
       const isExcluded = excludeKeywords.some(k => text.includes(k));
       if (isExcluded) continue;
 
+      // 寻找真正的 <a> 链接元素
+      const linkElem = (node.tagName === 'A' && node.href) ? node : node.querySelector('a[href]');
+      if (!linkElem || !linkElem.href) continue;
+
+      const targetUrl = linkElem.href;
+
       // 生成唯一识别 Key 用于去重
       const notifKey = text.replace(/\s+/g, '_').substring(0, 50);
-      if (processedComments.includes("notif_" + notifKey)) {
+      if (sessionClickedNotifs.has(notifKey)) {
         continue;
       }
 
@@ -133,20 +152,22 @@
       }
 
       // 提取可能的用户名
-      let userName = "未知用户";
+      let userName = "通知用户";
       const parts = text.split('评论了');
       if (parts.length > 1) {
-        userName = parts[0].trim();
+        userName = parts[0].trim().replace(/^未读\s*/, '');
       }
 
-      // 确保该条目在视觉上可见
-      if (isVisible(node)) {
+      if (isVisible(node) || isVisible(linkElem)) {
         eligible.push({
           element: node,
+          linkElement: linkElem,
+          targetUrl: targetUrl,
           text: text,
           userName: userName,
           notifKey: notifKey
         });
+        break; // 优先获取首条最新
       }
     }
 
@@ -170,6 +191,6 @@
   }
 
   // 页面加载就绪后启动监听循环
-  setTimeout(checkAndRun, 2500);
+  setTimeout(checkAndRun, 2000);
 
 })();
