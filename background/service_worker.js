@@ -64,12 +64,12 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 
 async function startMonitoring() {
   const settings = await StorageUtil.getSettings();
-  const hasNotifications = settings.enableNotificationMode !== false;
-  const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+  let hasNotifications = settings.enableNotificationMode !== false;
+  let hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
 
   if (!hasNotifications && !hasTargets) {
-    await StorageUtil.saveSettings({ isRunning: false, statusMessage: "提示: 请开启全主页通知流监控，或在贴文列表中添加链接" });
-    return;
+    hasNotifications = true;
+    await StorageUtil.saveSettings({ enableNotificationMode: true });
   }
   
   await StorageUtil.saveSettings({ isRunning: true, isPaused: false, emergencyBrakeReason: "" });

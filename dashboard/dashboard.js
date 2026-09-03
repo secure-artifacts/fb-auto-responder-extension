@@ -80,12 +80,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   topBtnStart.addEventListener('click', async () => {
     const settings = await StorageUtil.getSettings();
-    const hasNotifications = settings.enableNotificationMode !== false;
-    const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+    let hasNotifications = settings.enableNotificationMode !== false;
+    let hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
 
     if (!hasNotifications && !hasTargets) {
-      alert("请至少在【防封与去重策略】中开启【全主页通知流实时监控】，或在【目标贴文管理】中添加至少一条贴文链接！");
-      return;
+      hasNotifications = true;
+      await StorageUtil.saveSettings({ enableNotificationMode: true });
     }
     await StorageUtil.saveSettings({ isRunning: true, isPaused: false, statusMessage: "正在启动自动化监控..." });
     chrome.runtime.sendMessage({ action: "START_MONITOR" });

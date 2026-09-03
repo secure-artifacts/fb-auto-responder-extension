@@ -89,11 +89,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   btnStart.addEventListener('click', async () => {
     const settings = await StorageUtil.getSettings();
-    if (!settings.targetUrls || settings.targetUrls.length === 0) {
-      if (confirm("⚠️ 您尚未配置监控贴文链接！\n是否立即打开管理控制台添加链接？")) {
-        chrome.runtime.openOptionsPage();
-      }
-      return;
+    let hasNotifications = settings.enableNotificationMode !== false;
+    let hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+
+    // 如果未配置贴文且未配置通知，默认直接按通知流全主页监控启动
+    if (!hasNotifications && !hasTargets) {
+      hasNotifications = true;
+      await StorageUtil.saveSettings({ enableNotificationMode: true });
     }
 
     await StorageUtil.saveSettings({
