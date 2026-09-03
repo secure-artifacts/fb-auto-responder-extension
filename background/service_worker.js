@@ -64,8 +64,11 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 
 async function startMonitoring() {
   const settings = await StorageUtil.getSettings();
-  if (settings.targetUrls.length === 0) {
-    await StorageUtil.saveSettings({ isRunning: false, statusMessage: "提示: 未配置任何目标贴文链接" });
+  const hasNotifications = settings.enableNotificationMode !== false;
+  const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+
+  if (!hasNotifications && !hasTargets) {
+    await StorageUtil.saveSettings({ isRunning: false, statusMessage: "提示: 请开启全主页通知流监控，或在贴文列表中添加链接" });
     return;
   }
   
@@ -76,7 +79,7 @@ async function startMonitoring() {
 async function stopMonitoring(isPaused) {
   await StorageUtil.saveSettings({ isRunning: false, isPaused: isPaused });
   if (!isPaused) {
-    await setWorkerState({ currentUrlIndex: 0 });
+    await setWorkerState({ currentUrlIndex: 0, forceTargetUrl: false });
   }
   await closeWorkerTab();
 }
@@ -85,6 +88,19 @@ async function scheduleNextUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
+  const isNotificationMode = settings.enableNotificationMode !== false;
+
+  // 如果开启了全主页通知流监控模式，单条贴文处理完毕后，自动返回通知中心继续守候
+  if (isNotificationMode) {
+    const waitSec = Math.max(2, settings.notificationCheckInterval || 5);
+    await StorageUtil.saveSettings({ statusMessage: `本条留言已处理完毕，${waitSec} 秒后返回全主页通知流...` });
+    setTimeout(() => {
+      loadCurrentUrl();
+    }, waitSec * 1000);
+    return;
+  }
+
+  // 纯指定贴文循环监控模式
   const urls = settings.targetUrls || [];
   if (urls.length === 0) return;
 
@@ -112,42 +128,58 @@ async function loadCurrentUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  const targets = settings.targetUrls || [];
-  const fillers = settings.activeUrls || [];
-
-  if (targets.length === 0) return;
-
+  const isNotificationMode = settings.enableNotificationMode !== false;
   let targetUrl = "";
   const state = await getWorkerState();
-  let currentUrlIndex = state.currentUrlIndex;
-  let isNextFiller = state.isNextFiller;
 
-  if (isNextFiller && fillers.length > 0 && settings.enableFillerUrls !== false) {
-    // 这次应该加载伪装链接
-    targetUrl = fillers[Math.floor(Math.random() * fillers.length)];
-    // 如果有多个伪装链接，且随机抽取到了和上次完全一样的链接，则向后顺延一个，保证不连续重复
-    if (fillers.length > 1 && state.lastFillerUrl === targetUrl) {
-      const currentIndex = fillers.indexOf(targetUrl);
-      targetUrl = fillers[(currentIndex + 1) % fillers.length];
-    }
-    
+  // 模式1：全主页通知流模式 (默认驻留 https://www.facebook.com/notifications)
+  if (isNotificationMode && !state.forceTargetUrl) {
+    targetUrl = "https://www.facebook.com/notifications";
     await StorageUtil.saveSettings({
-      statusMessage: `正在访问伪装链接 (防封浏览): ${targetUrl.substring(0, 45)}...`,
-      currentWorkerMode: 'filler'
+      statusMessage: "正在驻留全主页通知流，秒级监听未读留言...",
+      currentWorkerMode: 'notification'
     });
-    await setWorkerState({ isNextFiller: false, lastFillerUrl: targetUrl });
   } else {
-    // 这次应该加载真实监控贴文
-    if (currentUrlIndex >= targets.length) {
-      currentUrlIndex = 0;
-      await setWorkerState({ currentUrlIndex });
+    // 模式2：经典指定贴文循环模式
+    const targets = settings.targetUrls || [];
+    const fillers = settings.activeUrls || [];
+
+    if (targets.length === 0) {
+      if (isNotificationMode) {
+        await setWorkerState({ forceTargetUrl: false });
+        loadCurrentUrl();
+        return;
+      }
+      return;
     }
-    targetUrl = targets[currentUrlIndex];
-    await StorageUtil.saveSettings({
-      statusMessage: `正在监控 [${currentUrlIndex + 1}/${targets.length}]: ${targetUrl.substring(0, 45)}...`,
-      currentWorkerMode: 'target'
-    });
-    await setWorkerState({ isNextFiller: true });
+
+    let currentUrlIndex = state.currentUrlIndex;
+    let isNextFiller = state.isNextFiller;
+
+    if (isNextFiller && fillers.length > 0 && settings.enableFillerUrls !== false) {
+      targetUrl = fillers[Math.floor(Math.random() * fillers.length)];
+      if (fillers.length > 1 && state.lastFillerUrl === targetUrl) {
+        const currentIndex = fillers.indexOf(targetUrl);
+        targetUrl = fillers[(currentIndex + 1) % fillers.length];
+      }
+      
+      await StorageUtil.saveSettings({
+        statusMessage: `正在访问伪装链接 (防封浏览): ${targetUrl.substring(0, 45)}...`,
+        currentWorkerMode: 'filler'
+      });
+      await setWorkerState({ isNextFiller: false, lastFillerUrl: targetUrl });
+    } else {
+      if (currentUrlIndex >= targets.length) {
+        currentUrlIndex = 0;
+        await setWorkerState({ currentUrlIndex });
+      }
+      targetUrl = targets[currentUrlIndex];
+      await StorageUtil.saveSettings({
+        statusMessage: `正在监控 [${currentUrlIndex + 1}/${targets.length}]: ${targetUrl.substring(0, 45)}...`,
+        currentWorkerMode: 'target'
+      });
+      await setWorkerState({ isNextFiller: true });
+    }
   }
 
   const finalState = await getWorkerState();

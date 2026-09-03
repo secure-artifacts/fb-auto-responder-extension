@@ -20,6 +20,9 @@ const DEFAULT_SETTINGS = {
   fillerWaitMax: 45, // 伪装页面最长停留时间（秒）
   emergencyBrakeEnabled: true,
   emergencyBrakeReason: "",
+  enableNotificationMode: true, // 是否开启全主页通知流实时监控
+  enableTargetUrlsMode: false, // 是否开启指定贴文列表循环监控
+  notificationCheckInterval: 5, // 通知流检查与刷新间隔（秒）
   statusMessage: "系统就绪，等待启动任务...",
   stats: {
     totalProcessed: 0,

@@ -8,6 +8,11 @@
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
+  // 如果当前在通知页面，由专属的 notification_monitor.js 接管，此处直接退出
+  if (window.location.pathname.startsWith('/notifications')) {
+    return;
+  }
+
   // 放弃脆弱的 URL 字符串比对（脸书经常重定向链接导致匹配失败）
   // 直接读取后台调度引擎指派的模式
   const mode = settings.currentWorkerMode || 'target';

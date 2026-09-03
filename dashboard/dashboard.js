@@ -80,8 +80,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   topBtnStart.addEventListener('click', async () => {
     const settings = await StorageUtil.getSettings();
-    if (settings.targetUrls.length === 0) {
-      alert("请先添加并保存至少一条目标贴文链接！");
+    const hasNotifications = settings.enableNotificationMode !== false;
+    const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+
+    if (!hasNotifications && !hasTargets) {
+      alert("请至少在【防封与去重策略】中开启【全主页通知流实时监控】，或在【目标贴文管理】中添加至少一条贴文链接！");
       return;
     }
     await StorageUtil.saveSettings({ isRunning: true, isPaused: false, statusMessage: "正在启动自动化监控..." });
@@ -474,6 +477,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnModalSave.addEventListener('click', saveRuleFromModal);
 
   // ==================== TAB 3: 防封与去重设置 ====================
+  const checkEnableNotificationMode = document.getElementById('checkEnableNotificationMode');
+  const checkEnableTargetUrlsMode = document.getElementById('checkEnableTargetUrlsMode');
+  const inputNotificationInterval = document.getElementById('inputNotificationInterval');
   const inputDmInterval = document.getElementById('inputDmInterval');
   const inputCooldown = document.getElementById('inputCooldown');
   const inputSwitchInterval = document.getElementById('inputSwitchInterval');
@@ -487,6 +493,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function loadAntibanSettings() {
     const settings = await StorageUtil.getSettings();
+    if (checkEnableNotificationMode) checkEnableNotificationMode.checked = settings.enableNotificationMode !== false;
+    if (checkEnableTargetUrlsMode) checkEnableTargetUrlsMode.checked = !!settings.enableTargetUrlsMode;
+    if (inputNotificationInterval) inputNotificationInterval.value = settings.notificationCheckInterval || 5;
+
     inputDmInterval.value = settings.dmIntervalSeconds || 10;
     inputCooldown.value = settings.globalCooldownHours !== undefined ? settings.globalCooldownHours : 24;
     inputSwitchInterval.value = settings.switchIntervalSeconds || 15;
@@ -497,6 +507,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function saveAntibanSettings() {
+    const enableNotif = checkEnableNotificationMode ? checkEnableNotificationMode.checked : true;
+    const enableTargets = checkEnableTargetUrlsMode ? checkEnableTargetUrlsMode.checked : false;
+    const notifInterval = parseInt(inputNotificationInterval.value, 10) || 5;
+
     const dmSec = parseInt(inputDmInterval.value, 10) || 10;
     const cdHr = parseInt(inputCooldown.value, 10) || 24;
     const switchSec = parseInt(inputSwitchInterval.value, 10) || 15;
@@ -506,6 +520,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const emergencyBrake = checkEmergencyBrake ? checkEmergencyBrake.checked : true;
 
     await StorageUtil.saveSettings({
+      enableNotificationMode: enableNotif,
+      enableTargetUrlsMode: enableTargets,
+      notificationCheckInterval: Math.max(3, notifInterval),
       dmIntervalSeconds: dmSec,
       globalCooldownHours: cdHr,
       dmCooldownHours: cdHr,
@@ -521,6 +538,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (btnSaveAntiban) btnSaveAntiban.addEventListener('click', saveAntibanSettings);
+  if (checkEnableNotificationMode) checkEnableNotificationMode.addEventListener('change', saveAntibanSettings);
+  if (checkEnableTargetUrlsMode) checkEnableTargetUrlsMode.addEventListener('change', saveAntibanSettings);
+  if (inputNotificationInterval) inputNotificationInterval.addEventListener('change', saveAntibanSettings);
   inputDmInterval.addEventListener('change', saveAntibanSettings);
   inputCooldown.addEventListener('change', saveAntibanSettings);
   inputSwitchInterval.addEventListener('change', saveAntibanSettings);

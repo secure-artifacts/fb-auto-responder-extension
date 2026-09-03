@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.0.18</span>
+          <span>Pro Studio v1.0.19</span>
         </div>
       </div>
 
@@ -148,6 +148,25 @@
             </div>
             <div class="card-body">
               <div class="form-grid">
+
+                <div class="form-group full-width-group" style="grid-column: 1 / -1; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 14px 16px; margin-bottom: 8px;">
+                  <h4 style="margin: 0 0 10px 0; color: var(--accent-cyan); font-size: 14px; font-weight: 700;">📡 监控工作模式与通知流配置 (支持按需勾选或组合)</h4>
+                  <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <label class="checkbox-label" style="font-weight: 600;">
+                      <input type="checkbox" id="checkEnableNotificationMode" checked>
+                      <span>开启全主页通知流实时监控 (⚡ 强烈推荐：自动监听 notifications 页面，极速秒级响应全主页新留言)</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="checkEnableTargetUrlsMode">
+                      <span>开启指定贴文列表循环监控 (轮流巡检目标贴文管理中填写的指定链接)</span>
+                    </label>
+                  </div>
+                  <div style="margin-top: 12px; display: flex; align-items: center; gap: 12px;">
+                    <label style="font-size: 13px; font-weight: 600;">通知流检查刷新间隔:</label>
+                    <input type="number" id="inputNotificationInterval" class="form-input" min="3" max="120" value="5" style="width: 80px;">
+                    <span style="font-size: 13px; color: var(--text-muted);">秒 (推荐：白天抢客户可设为 <b>3~5</b> 秒，夜间可调至 10~15 秒)</span>
+                  </div>
+                </div>
 
                 <div class="form-group">
                   <label>连续私信间隔时间 (秒):</label>
