@@ -164,28 +164,31 @@
       const isExcluded = excludeKeywords.some(k => text.includes(k));
       if (isExcluded) continue;
 
-      // 精准寻找真正的贴文/Reels超链接，严格过滤掉头像链接与粉丝主页链接
-      let linkElem = null;
-      const isBadLink = (u) => {
-        const s = (u || '').toLowerCase();
-        return s.includes('/followers') || s.includes('/following') || s.includes('/friends') || s.includes('/photos') || s.includes('/about');
+      // 严格验证并提取贴文/Reels超链接，杜绝一切头像、主页、粉丝页误跳
+      const postKeywords = ['/reel/', '/videos/', '/posts/', 'comment_id', 'story_fbid', 'notif_id', 'permalink.php'];
+      const badKeywords = ['/followers', '/following', '/friends', '/photos', '/about', '/groups'];
+
+      const isLegitPostUrl = (u) => {
+        if (!u) return false;
+        const s = u.toLowerCase();
+        const hasBad = badKeywords.some(k => s.includes(k));
+        if (hasBad) return false;
+        return postKeywords.some(k => s.includes(k));
       };
 
-      if (node.tagName === 'A' && node.href && !isBadLink(node.href)) {
+      let linkElem = null;
+      if (node.tagName === 'A' && isLegitPostUrl(node.href)) {
         linkElem = node;
       } else {
-        const allLinks = Array.from(node.querySelectorAll('a[href]')).filter(a => !isBadLink(a.href));
-        // 优先锁定带有 notif_id、comment_id、reel、posts 或含有评论正文的链接
-        linkElem = allLinks.find(a => {
-          const h = (a.href || '').toLowerCase();
-          const innerT = (a.innerText || a.textContent || '').trim();
-          const isPostParam = h.includes('notif_id') || h.includes('comment_id') || h.includes('/reel/') || h.includes('/posts/') || h.includes('story_fbid');
-          const hasText = commentKeywords.some(k => innerT.includes(k));
-          return isPostParam || hasText;
-        }) || allLinks[allLinks.length - 1]; // 通常最后一个链接才是内容主体，第一个往往是头像
+        const allLinks = Array.from(node.querySelectorAll('a[href]'));
+        linkElem = allLinks.find(a => isLegitPostUrl(a.href));
       }
 
-      if (!linkElem || !linkElem.href || isBadLink(linkElem.href)) continue;
+      // 如果当前通知行中根本没有合法的贴文链接，绝对跳过，严禁盲目乱点！
+      if (!linkElem || !linkElem.href || !isLegitPostUrl(linkElem.href)) {
+        console.warn("[Notification Monitor] 未在该通知中检测到合法的贴文链接，跳过以防误入主页:", text.substring(0, 30));
+        continue;
+      }
 
       const targetUrl = linkElem.href;
 

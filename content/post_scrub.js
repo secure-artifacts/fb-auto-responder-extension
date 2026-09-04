@@ -30,21 +30,34 @@
   startSingleRun(window.location.href);
 
   async function startSingleRun(targetUrl) {
-    await StorageUtil.saveSettings({ statusMessage: `等待页面加载 (4秒)...` });
-    await new Promise(r => setTimeout(r, 4000)); // 先等待 4 秒
+    await StorageUtil.saveSettings({ statusMessage: `正在载入评论区...` });
 
-    // 针对 Reels 或隐藏评论区的页面，自动点击评论按钮展开面板
-    await ensureCommentsPanelOpen();
-
-    await StorageUtil.saveSettings({ statusMessage: `等待评论区渲染 (4秒)...` });
-    await new Promise(r => setTimeout(r, 4000)); // 再等待 4 秒确保渲染
+    // 智能渐进式探测评论区加载（最多等 7 秒，一旦评论卡片出现立即继续，无需死等）
+    let commentReady = false;
+    for (let i = 0; i < 14; i++) {
+      const nodes = getIndividualCommentNodes();
+      if (nodes.length > 0) {
+        commentReady = true;
+        console.log(`[V5.0] 评论区已就绪，探测到 ${nodes.length} 个评论卡片`);
+        break;
+      }
+      // 如果前 3 秒尚未渲染任何评论，尝试探测是否需要轻量展开
+      if (i === 6) {
+        await ensureCommentsPanelOpen();
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
 
     if (checkFacebookEmergencyBrake()) return;
 
-    await ensureNewestCommentSorting();
-    
-    // 给重新排序留点时间
-    await new Promise(r => setTimeout(r, 3000));
+    // 关键：如果来源于通知跳转，Facebook 会自动高亮置顶目标评论，此时严禁点击“重新排序”，否则会把目标评论冲掉！
+    const isFromNotification = window.location.pathname.startsWith('/notifications') || 
+                               window.location.href.includes('comment_id') || 
+                               window.location.href.includes('notif_id');
+    if (!isFromNotification) {
+      await ensureNewestCommentSorting();
+      await new Promise(r => setTimeout(r, 2000));
+    }
 
     // 展开被折叠的“其他 X 条评论”或“查看更多”
     await expandAllHiddenComments();
@@ -54,7 +67,7 @@
     console.log(`[V5.0] 扫描完毕，待私信队列长度: ${queue.length}`);
 
     if (queue.length === 0) {
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 2000));
       finishPageAndNext();
       return;
     }
@@ -519,19 +532,17 @@
       if (commentBtns.length > 0) {
         const targetBtn = commentBtns[0];
         
-        // Facebook React 点击事件可能绑在父级或者子级上，所以我们全都触发一遍
-        const simulateClick = (el) => {
-          if (!el) return;
-          el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-          el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-          el.click();
-        };
+        // 绝对安全防护：严禁点击任何 <a> 标签或超链接包裹的元素，防止意外跳往公共主页粉丝页！
+        if (targetBtn.tagName === 'A' || targetBtn.closest('a')) {
+          console.warn("[V5.0] 目标按钮包含超链接，放弃点击以防跳离贴文页面！");
+          return;
+        }
 
-        simulateClick(targetBtn);
-        if (targetBtn.firstElementChild) simulateClick(targetBtn.firstElementChild);
-        if (targetBtn.parentElement) simulateClick(targetBtn.parentElement);
+        targetBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+        targetBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+        targetBtn.click();
         
-        console.log("[V5.0] 已深入点击目标评论按钮:", targetBtn.getAttribute('aria-label') || targetBtn.textContent.trim().substring(0, 20) || "SVG Icon");
+        console.log("[V5.0] 已点击目标评论展开按钮:", targetBtn.getAttribute('aria-label') || targetBtn.textContent.trim().substring(0, 20) || "SVG Icon");
       } else {
         console.warn("[V5.0] 未能在页面上找到任何符合特征的按钮，展开大概率失败。");
       }
