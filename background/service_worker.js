@@ -21,7 +21,7 @@ async function setWorkerState(newState) {
   });
 }
 
-console.log("FB Auto-Responder Service Worker v5.0.0 Initialized.");
+console.log("FB Auto-Responder Service Worker v5.1.0 Initialized (Anti-Sleep & Strict Single-Tab Guard).");
 
 // ── 监听来自 Popup 与 Content Script 的指令 ──────────────────────────────
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
@@ -182,36 +182,122 @@ async function loadCurrentUrl() {
     }
   }
 
-  const finalState = await getWorkerState();
-  const workerTabId = finalState.workerTabId;
-
-  if (workerTabId) {
-    chrome.tabs.get(workerTabId, async (tab) => {
-      if (chrome.runtime.lastError || !tab) {
-        await setWorkerState({ workerTabId: null });
-        createWorkerTab(targetUrl);
-      } else {
-        // 提取核心 URL 进行精准比对，忽略查询参数和锚点，避免出现 facebook.com/ 包含 facebook.com/xxx 的误判
-        const stripUrl = (u) => { try { const url = new URL(u); return url.origin + url.pathname.replace(/\/$/, ''); } catch(e) { return u.split('?')[0].replace(/\/$/, ''); } };
-        if (tab.url && stripUrl(tab.url) === stripUrl(targetUrl)) {
-          chrome.tabs.reload(workerTabId);
-        } else {
-          chrome.tabs.update(workerTabId, { url: targetUrl, active: false });
-        }
-      }
-    });
-  } else {
-    createWorkerTab(targetUrl);
-  }
+  // 统一交给单标签安全调度守卫处理（查重、防多开、防休眠、防硬刷）
+  await ensureWorkerTab(targetUrl);
 }
 
-function createWorkerTab(url) {
-  chrome.tabs.create({ url: url, active: false }, async (tab) => {
-    if (chrome.runtime.lastError) {
-      console.error("Tab create error:", chrome.runtime.lastError.message);
-      return;
+const stripUrl = (u) => {
+  if (!u) return '';
+  try {
+    const url = new URL(u);
+    return (url.origin + url.pathname).replace(/\/$/, '').toLowerCase();
+  } catch(e) {
+    return u.split('?')[0].replace(/\/$/, '').toLowerCase();
+  }
+};
+
+async function ensureWorkerTab(targetUrl) {
+  const state = await getWorkerState();
+  const targetClean = stripUrl(targetUrl);
+  let activeWorkerTab = null;
+
+  // 1. 如果此前已记录 workerTabId，检验该标签页是否依然存在
+  if (state.workerTabId) {
+    activeWorkerTab = await new Promise(resolve => {
+      chrome.tabs.get(state.workerTabId, tab => {
+        if (chrome.runtime.lastError || !tab) {
+          resolve(null);
+        } else {
+          resolve(tab);
+        }
+      });
+    });
+  }
+
+  // 2. 跨所有浏览器窗口查询当前所有 Facebook 标签页（查重与防多开）
+  const allFbTabs = await new Promise(resolve => {
+    chrome.tabs.query({ url: ["*://*.facebook.com/*"] }, tabs => {
+      if (chrome.runtime.lastError || !tabs) resolve([]);
+      else resolve(tabs);
+    });
+  });
+
+  // 如果 activeWorkerTab 已经失效，但在所有打开的标签页里找到了现成的 Facebook 页面，优先认领并复用！
+  if (!activeWorkerTab && allFbTabs.length > 0) {
+    const matchedTab = allFbTabs.find(t => t.url && stripUrl(t.url) === targetClean) ||
+                       allFbTabs.find(t => t.url && stripUrl(t.url).includes('/notifications')) ||
+                       allFbTabs[0];
+    if (matchedTab) {
+      console.log(`[Worker Tab Guard] 成功从已有标签页中认领并复用: ID ${matchedTab.id} (${matchedTab.url})`);
+      activeWorkerTab = matchedTab;
+      await setWorkerState({ workerTabId: matchedTab.id });
     }
-    await setWorkerState({ workerTabId: tab.id });
+  }
+
+  // 3. 严格去重：如果发现当前浏览器中有多个 /notifications 标签页，关闭除当前工作标签之外的所有重复项！
+  if (allFbTabs.length > 1) {
+    for (const t of allFbTabs) {
+      if (activeWorkerTab && t.id === activeWorkerTab.id) continue;
+      if (t.url && stripUrl(t.url).includes('/notifications')) {
+        console.warn(`[Worker Tab Guard] 发现多余的通知标签页 ID ${t.id}，自动清理关闭，保持全局单标签！`);
+        chrome.tabs.remove(t.id, () => {
+          if (chrome.runtime.lastError) { /* ignore */ }
+        });
+      }
+    }
+  }
+
+  // 4. 如果找到了可复用的工作标签页
+  if (activeWorkerTab) {
+    const tabId = activeWorkerTab.id;
+
+    // 方案一：【防止标签页休眠】设置 autoDiscardable 为 false，禁止 Chrome 丢弃/睡眠此标签
+    try {
+      chrome.tabs.update(tabId, { autoDiscardable: false }, () => {
+        if (chrome.runtime.lastError) { /* ignore */ }
+      });
+    } catch (e) {
+      console.warn("[Worker Tab Guard] 设置 autoDiscardable 异常:", e);
+    }
+
+    const currentClean = stripUrl(activeWorkerTab.url);
+
+    // 方案三：【避免硬 F5 刷新】
+    if (currentClean === targetClean) {
+      if (targetClean.includes('/notifications')) {
+        console.log(`[Worker Tab Guard] 工作标签页已处于通知中心，通过页面内软刷新/软巡检，禁止全页重载！`);
+        chrome.tabs.sendMessage(tabId, { action: "SOFT_REFRESH_NOTIFICATIONS" }, () => {
+          if (chrome.runtime.lastError) { /* ignore */ }
+        });
+      } else {
+        console.log(`[Worker Tab Guard] 工作标签页已处于目标贴文，维持当前页面`);
+      }
+    } else {
+      // 只有当 URL 确实不同时（例如从贴文跳回通知流，或从通知流跳到新贴文），才触发平滑导航
+      console.log(`[Worker Tab Guard] 标签页 ${tabId} 导航至目标地址: ${targetUrl}`);
+      chrome.tabs.update(tabId, { url: targetUrl, active: false });
+    }
+    return activeWorkerTab;
+  }
+
+  // 5. 如果全局没有任何 Facebook 标签页，仅在此处新建 1 个标签页
+  return new Promise(resolve => {
+    console.log(`[Worker Tab Guard] 未检测到任何可复用的 Facebook 标签页，新建唯一工作标签页...`);
+    chrome.tabs.create({ url: targetUrl, active: false }, async (newTab) => {
+      if (chrome.runtime.lastError || !newTab) {
+        console.error("[Worker Tab Guard] 创建工作标签页失败:", chrome.runtime.lastError?.message);
+        resolve(null);
+        return;
+      }
+      await setWorkerState({ workerTabId: newTab.id });
+
+      // 新建标签页同样立即施加【防休眠保护】
+      chrome.tabs.update(newTab.id, { autoDiscardable: false }, () => {
+        if (chrome.runtime.lastError) { /* ignore */ }
+      });
+      console.log(`[Worker Tab Guard] 成功创建并锁定唯一工作标签页: ID ${newTab.id} (已禁用休眠)`);
+      resolve(newTab);
+    });
   });
 }
 
@@ -224,6 +310,15 @@ async function closeWorkerTab() {
     await setWorkerState({ workerTabId: null });
   }
 }
+
+// ── 监听标签页关闭事件，实时同步释放 workerTabId ─────────────────────────
+chrome.tabs.onRemoved.addListener(async (closedTabId) => {
+  const state = await getWorkerState();
+  if (state.workerTabId === closedTabId) {
+    console.log(`[Worker Tab Guard] 工作标签页 ${closedTabId} 已被关闭，自动重置状态`);
+    await setWorkerState({ workerTabId: null });
+  }
+});
 
 // ── 触发风控紧急熔断保护 ──────────────────────────────────────────────────
 async function triggerEmergencyBrake(reason) {

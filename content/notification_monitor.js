@@ -12,9 +12,36 @@
   console.log("[Notification Monitor] 已加载，准备监听全主页通知流...");
 
   let isProcessingNotification = false;
+  let pollTimer = null;
   const sessionClickedNotifs = new Set();
 
+  function scheduleNextPoll(seconds) {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    pollTimer = setTimeout(() => {
+      checkAndRun();
+    }, seconds * 1000);
+  }
+
+  // 监听来自后台的静默软巡检指令
+  chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
+    if (req.action === "SOFT_REFRESH_NOTIFICATIONS") {
+      console.log("[Notification Monitor] 收到后台软巡检唤醒指令...");
+      if (!isProcessingNotification) {
+        checkAndRun();
+      }
+      sendResponse({ status: "ACK" });
+    }
+    return true;
+  });
+
   async function checkAndRun() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
     const settings = await StorageUtil.getSettings();
     if (!settings.isRunning || settings.isPaused) return;
     if (settings.enableNotificationMode === false) return;
@@ -26,8 +53,9 @@
       currentWorkerMode: 'notification'
     });
 
-    // 1. 尝试定位并优先切换至【未读 (Unread)】标签
+    // 1. 尝试定位并优先切换至【未读 (Unread)】标签，并触发轻量微交互拉取
     await trySwitchToUnreadTab();
+    await performSoftRefreshTrigger();
 
     // 2. 扫描可见的通知列表
     let commentNotifs = await findEligibleCommentNotifications(settings);
@@ -101,7 +129,7 @@
       await StorageUtil.saveSettings({
         statusMessage: `当前通知已处理，${intervalSec} 秒后检索下一条...`
       });
-      setTimeout(checkAndRun, intervalSec * 1000);
+      scheduleNextPoll(intervalSec);
       return;
     }
 
@@ -112,7 +140,7 @@
       statusMessage: `暂无新未读留言，${intervalSec} 秒后再次巡检...`
     });
 
-    setTimeout(checkAndRun, intervalSec * 1000);
+    scheduleNextPoll(intervalSec);
   }
 
   function closeCurrentOverlay() {
@@ -141,6 +169,25 @@
       }
     } catch (e) {
       console.warn("[Notification Monitor] 切换未读标签异常:", e);
+    }
+  }
+
+  // 软巡检触发刷新：检测新通知气泡或执行轻微微滚动，促使 Facebook 虚拟列表渲染
+  async function performSoftRefreshTrigger() {
+    try {
+      // 1. 检查是否有 Facebook 弹出的“新通知 / 查看新通知”小气泡
+      const newNotifPills = Array.from(document.querySelectorAll('div[role="button"], span, a')).filter(el => {
+        const t = (el.innerText || el.textContent || '').trim();
+        return t === '新通知' || t === '查看最新通知' || t === 'New' || t === 'New notifications' || t === 'Novas notificações';
+      });
+      if (newNotifPills.length > 0 && isVisible(newNotifPills[0])) {
+        console.log("[Notification Monitor] 发现 Facebook '新通知' 气泡，点击拉取最新流...");
+        newNotifPills[0].click();
+        await new Promise(r => setTimeout(r, 800));
+        return;
+      }
+    } catch (e) {
+      console.warn("[Notification Monitor] 软巡检微交互异常:", e);
     }
   }
 
@@ -249,6 +296,6 @@
   }
 
   // 页面加载就绪后启动监听循环
-  setTimeout(checkAndRun, 2000);
+  scheduleNextPoll(2);
 
 })();
