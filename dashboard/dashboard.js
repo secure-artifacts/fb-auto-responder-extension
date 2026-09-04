@@ -672,6 +672,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sheetModalTitle = document.getElementById('sheetModalTitle');
   const sheetConfigId = document.getElementById('sheetConfigId');
   const sheetConfigName = document.getElementById('sheetConfigName');
+  const sheetConfigDocUrl = document.getElementById('sheetConfigDocUrl');
   const sheetConfigUrl = document.getElementById('sheetConfigUrl');
   const sheetConfigTabName = document.getElementById('sheetConfigTabName');
   const sheetConfigEnabled = document.getElementById('sheetConfigEnabled');
@@ -790,18 +791,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    sheetsListContainer.innerHTML = sheets.map(sheet => `
+    sheetsListContainer.innerHTML = sheets.map(sheet => {
+      // 智能识别表格浏览链接（优先读 docUrl，其次如果 name 包含 docs.google.com 则自适应提取）
+      const docUrl = sheet.docUrl || (sheet.name && sheet.name.includes('docs.google.com/spreadsheets') ? sheet.name : '');
+      const hasDocUrl = !!docUrl;
+
+      return `
       <div class="sheet-card ${sheet.enabled ? '' : 'disabled'}" data-id="${sheet.id}">
         <div class="sheet-card-info">
           <div class="sheet-card-title-row">
-            <h4 class="sheet-card-title">${escapeHtml(sheet.name)}</h4>
+            <h4 class="sheet-card-title" title="${escapeHtml(sheet.name)}">${escapeHtml(sheet.name)}</h4>
             <span class="sheet-status-badge ${sheet.enabled ? 'active' : 'inactive'}">
               ${sheet.enabled ? '🟢 正在同步' : '⚪ 已暂停'}
             </span>
+            ${hasDocUrl ? `
+              <div class="sheet-quick-pills">
+                <a href="${escapeHtml(docUrl)}" target="_blank" rel="noopener noreferrer" class="btn-quick-pill btn-open-sheet" title="在浏览器新标签页一键打开此在线表格">
+                  ↗️ 打开表格
+                </a>
+                <button type="button" class="btn-quick-pill btn-copy-sheet-url" data-copy="${escapeHtml(docUrl)}" title="一键复制 Google 在线表格浏览网址">
+                  📋 复制表格
+                </button>
+              </div>
+            ` : ''}
           </div>
           <div class="sheet-card-meta">
             <span class="meta-item"><b>工作表:</b> <code>${escapeHtml(sheet.sheetName || 'Sheet1')}</code></span>
-            <span class="meta-item text-truncate" title="${escapeHtml(sheet.webhookUrl)}"><b>Webhook 链接:</b> ${escapeHtml(sheet.webhookUrl)}</span>
+            <span class="meta-item meta-webhook">
+              <b>Webhook:</b> <code class="text-truncate" style="max-width: 280px;" title="${escapeHtml(sheet.webhookUrl)}">${escapeHtml(sheet.webhookUrl)}</code>
+              <button type="button" class="btn-quick-pill btn-copy-webhook-url" data-copy="${escapeHtml(sheet.webhookUrl)}" title="一键复制 Webhook 部署链接，方便转发给同事或在其它电脑上直接使用">
+                📋 复制 Webhook
+              </button>
+            </span>
           </div>
         </div>
         <div class="sheet-card-actions">
@@ -819,7 +840,34 @@ document.addEventListener('DOMContentLoaded', async () => {
           </button>
         </div>
       </div>
-    `).join('');
+    `; }).join('');
+
+    // 绑定一键复制事件
+    sheetsListContainer.querySelectorAll('.btn-copy-sheet-url, .btn-copy-webhook-url').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const textToCopy = btn.getAttribute('data-copy');
+        if (!textToCopy) return;
+
+        try {
+          await navigator.clipboard.writeText(textToCopy);
+        } catch (err) {
+          const textarea = document.createElement('textarea');
+          textarea.value = textToCopy;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
+
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = `<span style="color: #4ade80; font-weight: 700;">✓ 已复制!</span>`;
+        setTimeout(() => {
+          btn.innerHTML = originalHtml;
+        }, 1500);
+      });
+    });
 
     // 绑定事件
     sheetsListContainer.querySelectorAll('.btn-toggle-sheet').forEach(btn => {
@@ -844,6 +892,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           sheetModalTitle.textContent = "编辑 Google 表格连接";
           sheetConfigId.value = target.id;
           sheetConfigName.value = target.name;
+          if (sheetConfigDocUrl) sheetConfigDocUrl.value = target.docUrl || "";
           sheetConfigUrl.value = target.webhookUrl;
           sheetConfigTabName.value = target.sheetName || "Sheet1";
           sheetConfigEnabled.checked = target.enabled;
