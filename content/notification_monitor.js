@@ -58,11 +58,8 @@
         sessionClickedNotifs.delete(targetNotif.notifKey);
       }, 60000);
 
-      // 触发仿真人类点击目标超链接及其内部元素
+      // 仅触发单次精准点击，避免双击导致弹窗闪退
       simulateHumanClick(targetNotif.linkElement);
-      if (targetNotif.linkElement.firstElementChild) {
-        simulateHumanClick(targetNotif.linkElement.firstElementChild);
-      }
 
       // 等待 Reels/贴文弹窗浮层展开或页面跳转
       let postOpened = false;
@@ -167,9 +164,28 @@
       const isExcluded = excludeKeywords.some(k => text.includes(k));
       if (isExcluded) continue;
 
-      // 寻找真正的 <a> 链接元素
-      const linkElem = (node.tagName === 'A' && node.href) ? node : node.querySelector('a[href]');
-      if (!linkElem || !linkElem.href) continue;
+      // 精准寻找真正的贴文/Reels超链接，严格过滤掉头像链接与粉丝主页链接
+      let linkElem = null;
+      const isBadLink = (u) => {
+        const s = (u || '').toLowerCase();
+        return s.includes('/followers') || s.includes('/following') || s.includes('/friends') || s.includes('/photos') || s.includes('/about');
+      };
+
+      if (node.tagName === 'A' && node.href && !isBadLink(node.href)) {
+        linkElem = node;
+      } else {
+        const allLinks = Array.from(node.querySelectorAll('a[href]')).filter(a => !isBadLink(a.href));
+        // 优先锁定带有 notif_id、comment_id、reel、posts 或含有评论正文的链接
+        linkElem = allLinks.find(a => {
+          const h = (a.href || '').toLowerCase();
+          const innerT = (a.innerText || a.textContent || '').trim();
+          const isPostParam = h.includes('notif_id') || h.includes('comment_id') || h.includes('/reel/') || h.includes('/posts/') || h.includes('story_fbid');
+          const hasText = commentKeywords.some(k => innerT.includes(k));
+          return isPostParam || hasText;
+        }) || allLinks[allLinks.length - 1]; // 通常最后一个链接才是内容主体，第一个往往是头像
+      }
+
+      if (!linkElem || !linkElem.href || isBadLink(linkElem.href)) continue;
 
       const targetUrl = linkElem.href;
 

@@ -435,20 +435,25 @@
 
   async function ensureCommentsPanelOpen() {
     try {
-      // 1. 严格判断面板是否已完全展开
-      // 不再仅仅依赖"表单/输入框"来判断，必须看到"排序按钮"或者实质性的回复按钮
-      const sortButtons = Array.from(document.querySelectorAll('div[role="button"], span')).filter(el => {
+      // 1. 严谨判断评论区是否已在屏幕上展开（严禁误判导致点击关闭按钮反向收缩！）
+      // 检查 A: 屏幕上是否有独立评论卡片
+      const commentArticles = document.querySelectorAll('div[role="article"], div[data-commentid]');
+      // 检查 B: 屏幕上是否有“回复”动作按钮（哪怕只有 1 个也是展开状态）
+      const hasReplyBtn = Array.from(document.querySelectorAll('span, div')).some(el => {
+        const t = el.innerText ? el.innerText.trim() : '';
+        return t === '回复' || t === 'Reply' || t === 'Responder' || t === '回覆' || t === 'Balas';
+      });
+      // 检查 C: 屏幕上是否有评论输入框（Reels 展开时必有）
+      const hasCommentInput = document.querySelector('[contenteditable="true"][role="textbox"], form[role="presentation"], div[aria-label*="评论" i], div[aria-label*="comment" i], div[aria-label*="escreva" i]');
+      // 检查 D: 排序按钮
+      const hasSortButtons = Array.from(document.querySelectorAll('div[role="button"], span')).some(el => {
         const txt = el.innerText ? el.innerText.trim() : '';
         return ['最相关', 'Most relevant', '所有留言', 'All comments', 'Newest', '最新'].some(k => txt.includes(k));
       });
-      // 检查是不是有很多评论已经被渲染出来了（比如页面上有多个 '回复'/'Reply' 文字）
-      const replyTexts = Array.from(document.querySelectorAll('span, div')).filter(el => {
-        const t = el.innerText ? el.innerText.trim() : '';
-        return t === '回复' || t === 'Reply' || t === 'Responder';
-      });
 
-      if (sortButtons.length > 0 || replyTexts.length > 3) {
-        return; // 已经展开
+      if (commentArticles.length > 0 || hasReplyBtn || hasCommentInput || hasSortButtons) {
+        console.log("[V5.0] 评论区已在屏幕上展开，绝不再次点击（防止误操作导致评论区关闭收缩）");
+        return;
       }
 
       console.log("[V5.0] 未检测到完全开放的评论列表，尝试寻找并点击【评论】按钮以展开面板...");
