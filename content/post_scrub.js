@@ -174,8 +174,26 @@
       const inDmCooldown = await StorageUtil.isUserInDmCooldown(userKey, dmCooldownHours);
       if (inDmCooldown) { debugInfo.cooldown++; continue; }
 
+      // 提取留言发布时间
+      let commentTime = "";
+      const timeLinks = Array.from(node.querySelectorAll('a, span[dir="auto"], span')).filter(el => {
+        const t = (el.innerText || el.textContent || '').trim();
+        return /^(刚刚|\d+\s*(秒|分钟|小时|天|周|月|年|s|m|h|d|w|y)|昨天|前天)/i.test(t);
+      });
+      if (timeLinks.length > 0) {
+        commentTime = (timeLinks[0].innerText || timeLinks[0].textContent || '').trim();
+      } else {
+        const lines = (node.innerText || "").split('\n').map(s => s.trim()).filter(Boolean);
+        const authorLine = lines.find(l => l.includes('·'));
+        if (authorLine) {
+          const parts = authorLine.split('·');
+          if (parts.length > 1) commentTime = parts[1].trim();
+        }
+      }
+      if (!commentTime) commentTime = "刚刚";
+
       queue.push({
-        node, userName, profileLink, commentText, commentId, userKey, matchedObj
+        node, userName, profileLink, commentText, commentId, userKey, matchedObj, commentTime
       });
     }
 
@@ -275,21 +293,19 @@
           }
         } catch(e) {}
 
+        // 11列最新标准格式写入 Google 表格
         const rowData = [
-          fbId,                                          // A: FB id
-          task.userName,                                 // B: 姓名
-          "",                                            // C: 自定义字段 (前台留言无地理位置)
-          "FB自动监控插件",                              // D: 来源
-          task.matchedObj.rule.name || task.matchedObj.matchedKeyword, // E: 标签
-          timeStr,                                       // F: 订阅时间
-          "",                                            // G: 性别
-          targetUrl || window.location.href,             // H: 最新贴文
-          targetUrl || window.location.href,             // I: 评论贴文
-          task.commentText || "",                        // J: 评论内容
-          dateStr,                                       // K: 日期
-          hourStr,                                       // L: 时间点
-          pageId,                                        // M: 专页id
-          timeStr                                        // N: 创建时间
+          timeStr,                                                     // A: 填表时间戳
+          dateStr,                                                     // B: 填表日期
+          fbId,                                                        // C: 留言用户ID
+          task.userName,                                               // D: 留言用户姓名
+          task.profileLink || "",                                      // E: 留言用户主页连接
+          targetUrl || window.location.href,                           // F: 评论贴文连接
+          task.commentText || "",                                      // G: 评论内容
+          "FB自动监控插件",                                            // H: 来源
+          task.matchedObj.rule.name || task.matchedObj.matchedKeyword, // I: 标签
+          task.commentTime || "刚刚",                                  // J: 留言日期
+          pageId || ""                                                 // K: 本公共主页ID
         ];
 
         chrome.runtime.sendMessage({ action: "SYNC_GOOGLE_SHEETS", payload: rowData }, () => {

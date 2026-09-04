@@ -306,20 +306,17 @@ async function testGoogleSheetConnection(webhookUrl, sheetName) {
     const hourStr = String(now.getHours());
 
     const testRow = [
-      "100088889999000",             // A: FB id
-      "测试用户_TestUser",           // B: 姓名
-      "连通性测试 | 测试通过",       // C: 自定义字段
-      "FB自动私信插件 (测试)",       // D: 来源
-      "测试连接",                    // E: 标签
-      timeStr,                       // F: 订阅时间
-      "",                            // G: 性别
-      "https://facebook.com/test",   // H: 最新贴文
-      "https://facebook.com/test",   // I: 评论贴文
-      "这是一条来自插件的连通性测试数据！", // J: 评论内容
-      dateStr,                       // K: 日期
-      hourStr,                       // L: 时间点
-      "page_test_123",               // M: 专页id
-      timeStr                        // N: 创建时间
+      timeStr,                                      // A: 填表时间戳
+      dateStr,                                      // B: 填表日期
+      "100088889999000",                            // C: 留言用户ID
+      "测试用户_TestUser",                          // D: 留言用户姓名
+      "https://facebook.com/test_user",             // E: 留言用户主页连接
+      "https://facebook.com/reel/123456789",        // F: 评论贴文连接
+      "这是一条来自插件的连通性测试数据！",        // G: 评论内容
+      "FB自动监控插件 (测试)",                      // H: 来源
+      "测试连接",                                   // I: 标签
+      "刚刚",                                       // J: 留言日期
+      "page_test_123"                               // K: 本公共主页ID
     ];
 
     const bodyData = {

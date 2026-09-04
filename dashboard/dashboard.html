@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.0.22</span>
+          <span>Pro Studio v1.0.23</span>
         </div>
       </div>
 
@@ -271,12 +271,11 @@
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(sheetName) || ss.getSheets()[0];
     
-    // 如果表格为空，自动初始化 14 列标准表头
+    // 如果表格为空，自动初始化 11 列标准表头
     if (sheet.getLastRow() === 0) {
       sheet.appendRow([
-        "FB id", "姓名", "自定义字段", "来源", "标签", 
-        "订阅时间", "性别", "最新贴文", "评论贴文", 
-        "评论内容", "日期", "时间点", "专页id", "创建时间"
+        "填表时间戳", "填表日期", "留言用户ID", "留言用户姓名", "留言用户主页连接",
+        "评论贴文连接", "评论内容", "来源", "标签", "留言日期", "本公共主页ID"
       ]);
     }
     

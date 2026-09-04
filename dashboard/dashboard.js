@@ -882,7 +882,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (chrome.runtime.lastError) {
             alert("测试请求失败: " + chrome.runtime.lastError.message);
           } else if (res && res.success) {
-            alert("🎉 测试成功！已向你的 Google 表格成功写入一行测试数据。\n请前往表格查看是否已生成 14 列完整表头与测试记录。");
+            alert("🎉 测试成功！已向你的 Google 表格成功写入一行测试数据。\n请前往表格查看是否已生成 11 列完整表头与测试记录。");
           } else {
             alert("❌ 测试写入失败，原因: " + (res ? res.error : "未知错误") + "\n\n排查建议：\n1. 请检查 Webhook 链接是否完整正确；\n2. 部署时【谁可以访问 (Who has access)】必须设置为【任何人 (Anyone)】！");
           }
