@@ -198,13 +198,37 @@
     }
 
     if (queue.length === 0) {
+      let plainReason = "";
+      if (debugInfo.total === 0) {
+        plainReason = "当前贴文评论区暂无任何新留言";
+      } else {
+        const details = [];
+        if (debugInfo.cooldown > 0) {
+          details.push(`${debugInfo.cooldown}位用户在24h去重期内 (此前已私信，防打扰跳过)`);
+        }
+        if (debugInfo.noKeyword > 0) {
+          details.push(`${debugInfo.noKeyword}条留言未命中设定的触发关键词`);
+        }
+        if (debugInfo.historical > 0) {
+          details.push(`${debugInfo.historical}条属于历史旧留言 (未开启处理历史留言)`);
+        }
+        if (debugInfo.author > 0) {
+          details.push(`${debugInfo.author}条为主页本人发言`);
+        }
+        if (details.length > 0) {
+          plainReason = `共扫描到 ${debugInfo.total} 条留言：${details.join('，')}，已自动跳过`;
+        } else {
+          plainReason = `检测到 ${debugInfo.total} 条留言，均不满足当前触发条件，已跳过`;
+        }
+      }
+
       await StorageUtil.addLog({
-        userName: "🛠️ 诊断信息",
+        userName: "ℹ️ 巡检摘要",
         postUrl: window.location.href,
-        commentText: `节点数:${debugInfo.total} | 本人:${debugInfo.author} | 历史:${debugInfo.historical} | 缺元素:${debugInfo.missingElem} | 无词匹配:${debugInfo.noKeyword} | 已发冷却:${debugInfo.cooldown}`,
+        commentText: plainReason,
         matchedKeyword: "-",
-        dmStatus: "队列为空，自动跳过",
-        level: "warning"
+        dmStatus: "无需发送，自动跳过",
+        level: "info"
       });
     }
 
@@ -234,8 +258,9 @@
           .replace(/\[FullName\]/ig, task.userName)
           .replace(/\[FirstName\]/ig, firstName);
         
-        dmSentSuccess = await performNativeDialogDm(task.node, task.userName, finalDmText);
-        dmStatus = dmSentSuccess ? "✅ 私信发送成功" : "❌ 发送失败 (原生弹窗)";
+        const dmResult = await performNativeDialogDm(task.node, task.userName, finalDmText);
+        dmSentSuccess = dmResult.success;
+        dmStatus = dmResult.statusText;
       }
 
       // 记录状态
@@ -654,7 +679,10 @@
       const sendMsgBtn = findSendMessageBtn(commentNode);
       if (!sendMsgBtn) {
         console.warn(`⚠️ 未找到 [发消息] 按钮: ${userName}`);
-        return false;
+        return {
+          success: false,
+          statusText: "⚠️ 跳过：留言无【发消息】按钮 (用户已关闭主页私信权限或主页受限)"
+        };
       }
 
       // 关闭可能还开着的旧弹窗
@@ -676,12 +704,20 @@
       sendMsgBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
 
       const dialog = await waitForNativeDmDialog(5000);
-      if (!dialog) return false;
+      if (!dialog) {
+        return {
+          success: false,
+          statusText: "❌ 发送失败：未弹出私信窗口 (网络延迟或受 FB 频率限制)"
+        };
+      }
 
       const inputElem = findDialogInputField(dialog);
       if (!inputElem) {
         closeDialog(dialog);
-        return false;
+        return {
+          success: false,
+          statusText: "❌ 发送失败：未定位到私信输入框"
+        };
       }
 
       await injectTextToInput(inputElem, dmText);
@@ -704,11 +740,17 @@
         closeDialog(dialog);
       }
       
-      return true;
+      return {
+        success: true,
+        statusText: "✅ 私信发送成功"
+      };
 
     } catch (e) {
       console.error("performNativeDialogDm error:", e);
-      return false;
+      return {
+        success: false,
+        statusText: "❌ 发送异常: " + (e.message || "未知错误")
+      };
     }
   }
 
