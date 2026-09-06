@@ -1,5 +1,5 @@
 /**
- * FB 智能私信大师 - Comments Manager Content Script (v1.1.0)
+ * FB 智能私信大师 - Comments Manager Content Script (v1.1.1)
  * 专为 Facebook 专业面板【评论管理工具】打造的集中式极速私信引擎
  * 页面地址: https://www.facebook.com/professional_dashboard/engagement/comments_manager/
  */
@@ -156,7 +156,7 @@
           .replace(/\[FirstName\]/ig, firstName);
 
         // 执行原地唤起原生私信弹窗并发送
-        console.log(`[Comments Manager Engine] 开始向 [${parsed.userName}] 原地发送私信...`);
+        console.log(`[Comments Manager Engine] 开始向 [${parsed.userName}] 原地发送私信... 内容: "${finalDmText.substring(0, 30)}..."`);
         const dmResult = await performNativeDialogDm(rowItem.sendBtn, parsed.userName, finalDmText);
 
         // 记录状态
@@ -174,9 +174,10 @@
         else stats.totalErrors += 1;
         await StorageUtil.saveSettings({ stats });
 
-        // 添加详细日志
+        // 添加详细日志 (包含 commentText 便于看板完整呈现)
         await StorageUtil.addLog({
           userName: parsed.userName,
+          commentText: parsed.commentText,
           postUrl: parsed.postUrl || window.location.href,
           profileLink: parsed.profileLink,
           matchedKeyword: matchResult.matchedKeyword,
@@ -243,7 +244,7 @@
     const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
     const allElements = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], a[role="button"], span, div, a'));
     
-    // 查找所有文案包含【发消息】且结构简洁的按钮
+    // 查找所有文案包含【发消息】的按钮元素
     const sendButtons = allElements.filter(el => {
       if (el.children.length > 2) return false;
       const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
@@ -262,8 +263,8 @@
       for (let i = 0; i < 9; i++) {
         if (!parent) break;
         const text = parent.innerText || '';
-        // 检查容器是否同时包含点赞/回复/隐藏，且有时间符号 "·"
-        if (text.includes('·') && (text.includes('回复') || text.includes('Reply') || text.includes('隐藏') || text.includes('Hide') || text.includes('赞') || text.includes('Like'))) {
+        // 检查容器是否同时包含点赞/回复/隐藏，且有时间符号（· 或 •）
+        if ((text.includes('·') || text.includes('•')) && (text.includes('回复') || text.includes('Reply') || text.includes('隐藏') || text.includes('Hide') || text.includes('赞') || text.includes('Like'))) {
           cardRow = parent;
         }
         parent = parent.parentElement;
@@ -290,7 +291,7 @@
     let profileLink = "";
     let postUrl = "";
 
-    // 1. 从卡片内的所有 <a> 链接中分类提取贴文链接与用户主页链接
+    // 1. 查找所有超链接
     const links = Array.from(container.querySelectorAll('a[href]'));
     
     // 贴文链接特征
@@ -300,8 +301,8 @@
       postUrl = postLinkEl.href;
     }
 
-    // 用户主页链接特征（排除贴文链接与当前管理面板链接）
-    const profileLinkEl = links.find(a => {
+    // 筛选用户主页链接（排除贴文链接与管理面板链接）
+    const userLinks = links.filter(a => {
       if (a === postLinkEl) return false;
       const h = (a.href || '').toLowerCase();
       if (!h) return false;
@@ -310,34 +311,52 @@
       return true;
     });
 
-    if (profileLinkEl) {
-      profileLink = profileLinkEl.href;
-      if (profileLinkEl.innerText && profileLinkEl.innerText.trim()) {
-        userName = profileLinkEl.innerText.trim();
-      }
+    // 关键优化：优先寻找包含真实文本的链接作为用户名，避免选中无文字的头像 <a>
+    const textUserLink = userLinks.find(a => {
+      const t = (a.innerText || a.textContent || '').trim();
+      return t.length > 0 && !t.includes('·') && !['赞', '回复', '发消息', '隐藏', '...'].includes(t);
+    });
+
+    if (textUserLink) {
+      profileLink = textUserLink.href;
+      userName = (textUserLink.innerText || textUserLink.textContent || '').trim();
+    } else if (userLinks.length > 0) {
+      profileLink = userLinks[0].href;
     }
 
     // 2. 从文本行分析提取用户名、时间、留言文本
     const rawText = container.innerText || '';
     const lines = rawText.split('\n').map(s => s.trim()).filter(Boolean);
 
-    // 寻找带 "·" 的那一行（例如 "Hollymoon Cee Brown Pedro · 2小时" 或 "· 2小时"）
-    const dotLineIdx = lines.findIndex(l => l.includes('·') && !l.includes('条评论'));
+    // 寻找带 "·" 或 "•" 的那一行
+    const dotLineIdx = lines.findIndex(l => (l.includes('·') || l.includes('•')) && !l.includes('条评论'));
     if (dotLineIdx !== -1) {
       const dotLine = lines[dotLineIdx];
-      const parts = dotLine.split('·');
-      if (parts[0] && parts[0].trim() && userName === "未知用户") {
-        userName = parts[0].trim();
+      const sep = dotLine.includes('·') ? '·' : '•';
+      const parts = dotLine.split(sep);
+
+      if (parts[0] && parts[0].trim()) {
+        if (userName === "未知用户") {
+          userName = parts[0].trim();
+        }
+      } else if (userName === "未知用户" && dotLineIdx > 0) {
+        // 如果点符号前无文本，说明上一行就是作者名
+        const prevLine = lines[dotLineIdx - 1];
+        if (!['没有文字内容', '条评论'].some(k => prevLine.includes(k))) {
+          userName = prevLine;
+        }
       }
+
       if (parts[1] && parts[1].trim()) {
         commentTime = parts[1].trim();
       }
 
-      // 留言内容通常紧随其后（在作者行之后，在赞/回复/发消息操作按钮之前）
+      // 提取留言内容：紧跟在作者行之后，在操作按钮之前
       const actionWords = ['赞', '回复', '发消息', '隐藏', 'Like', 'Reply', 'Send message', 'Hide', '...'];
       for (let i = dotLineIdx + 1; i < lines.length; i++) {
         const line = lines[i];
         if (actionWords.includes(line)) break;
+        if (line === commentTime) continue;
         if (!commentText) {
           commentText = line;
         } else {
@@ -346,13 +365,13 @@
       }
     }
 
-    // 如果依然未能提取到留言内容，尝试读取具有 dir="auto" 的 div/span
+    // 兜底提取留言内容
     if (!commentText) {
       const contentEls = Array.from(container.querySelectorAll('div[dir="auto"], span[dir="auto"]'));
       for (const el of contentEls) {
         const t = (el.innerText || '').trim();
         if (!t) continue;
-        if (t === userName || t.includes('·') || t === '没有文字内容' || ['赞', '回复', '发消息', '隐藏'].includes(t)) continue;
+        if (t === userName || t.includes('·') || t === '没有文字内容' || ['赞', '回复', '发消息', '隐藏', '...'].includes(t)) continue;
         commentText = t;
         break;
       }
@@ -431,27 +450,44 @@
         return { success: false, statusText: "⚠️ 跳过：留言无【发消息】按钮" };
       }
 
-      // 关闭旧弹窗
+      // 1. 关闭任何旧残留弹窗
       const existingDialog = document.querySelector('div[role="dialog"]');
       if (existingDialog) {
         closeDialog(existingDialog);
         await new Promise(r => setTimeout(r, 500));
       }
 
-      if (sendMsgBtn.tagName === 'A') {
-        sendMsgBtn.removeAttribute('target');
-        sendMsgBtn.removeAttribute('href');
+      // 2. 关键优化：精准定位真正具备点击事件的最外层按钮容器（div[role="button"] 或 a）
+      const actualClickable = sendMsgBtn.closest('div[role="button"]') || 
+                              sendMsgBtn.closest('a') || 
+                              sendMsgBtn.closest('button') || 
+                              sendMsgBtn;
+
+      // 绝不能删除 href 或 target，Facebook React 依赖这些属性识别路由和对话实体！
+
+      // 滚动至屏幕居中
+      actualClickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(r => setTimeout(r, 500));
+
+      console.log(`[Comments Manager Engine] 正在点击【发消息】按钮: 标签=${actualClickable.tagName}, role=${actualClickable.getAttribute('role')}`);
+
+      // 3. 多层次派发真实人类指针与点击事件
+      const simulateHumanClick = (target) => {
+        const opts = { bubbles: true, cancelable: true, view: window };
+        target.dispatchEvent(new PointerEvent('pointerdown', opts));
+        target.dispatchEvent(new MouseEvent('mousedown', opts));
+        target.dispatchEvent(new PointerEvent('pointerup', opts));
+        target.dispatchEvent(new MouseEvent('mouseup', opts));
+        target.click();
+      };
+
+      simulateHumanClick(actualClickable);
+      if (sendMsgBtn !== actualClickable) {
+        simulateHumanClick(sendMsgBtn);
       }
 
-      // 触发真实人类点击事件
-      sendMsgBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await new Promise(r => setTimeout(r, 300));
-      sendMsgBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-      sendMsgBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-      sendMsgBtn.click();
-
-      // 等待原生私信弹窗展开
-      const dialog = await waitForNativeDmDialog(5000);
+      // 4. 等待原生私信弹窗展开（最多 8 秒）
+      const dialog = await waitForNativeDmDialog(8000);
       if (!dialog) {
         return {
           success: false,
@@ -459,6 +495,9 @@
         };
       }
 
+      console.log("[Comments Manager Engine] 成功捕获原生私信弹窗！开始定位输入框...");
+
+      // 5. 定位输入框
       const inputElem = findDialogInputField(dialog);
       if (!inputElem) {
         closeDialog(dialog);
@@ -468,17 +507,21 @@
         };
       }
 
+      // 6. 注入私信文案
       await injectTextToInput(inputElem, dmText);
       await new Promise(r => setTimeout(r, 1000));
 
+      // 7. 点击弹窗内的【发消息】发送按钮
       const sent = await clickDialogSendButton(dialog);
       if (!sent) {
+        console.warn("[Comments Manager Engine] 未能点击到发送按钮，尝试回车键发送...");
         inputElem.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
       }
 
-      // 等待网络请求发送
+      // 等待网络请求发送完成
       await new Promise(r => setTimeout(r, 2500));
 
+      // 8. 关闭弹窗
       const dialogStillOpen = document.contains(dialog) && isVisible(dialog);
       if (dialogStillOpen) {
         closeDialog(dialog);
@@ -501,18 +544,38 @@
   async function waitForNativeDmDialog(timeoutMs) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+      // 方式 1: 查询标准 role="dialog" 或 aria-modal
+      const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], div[aria-modal="true"]'));
       for (const d of dialogs) {
         if (!isVisible(d)) continue;
-        const titleText = d.innerText || '';
+        const text = d.innerText || '';
         const titleKeys = ['发消息给', '发送消息给', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à'];
-        if (titleKeys.some(k => titleText.includes(k))) {
+        if (titleKeys.some(k => text.includes(k))) {
           return d;
         }
-        const hasInput = d.querySelector('[contenteditable="true"]');
-        if (hasInput && isVisible(hasInput)) return d;
+        const hasInput = d.querySelector('[contenteditable="true"], textarea');
+        if (hasInput && isVisible(hasInput) && text.includes('发消息')) {
+          return d;
+        }
       }
-      await new Promise(r => setTimeout(r, 300));
+
+      // 方式 2: 基于标题文本逆向寻找弹窗卡片容器
+      const allTextNodes = Array.from(document.querySelectorAll('h1, h2, h3, h4, span, div'));
+      const headerEl = allTextNodes.find(el => {
+        if (el.children.length > 2) return false;
+        const t = (el.innerText || '').trim();
+        return t.startsWith('发消息给') || t.startsWith('Send message to') || t.startsWith('Enviar mensagem');
+      });
+      if (headerEl) {
+        const modal = headerEl.closest('div[role="dialog"]') || 
+                      headerEl.closest('div[aria-modal="true"]') || 
+                      headerEl.parentElement?.parentElement?.parentElement;
+        if (modal && isVisible(modal)) {
+          return modal;
+        }
+      }
+
+      await new Promise(r => setTimeout(r, 400));
     }
     return null;
   }
@@ -522,7 +585,8 @@
       '[contenteditable="true"][aria-multiline="true"]',
       '[contenteditable="true"][role="textbox"]',
       '[contenteditable="true"]',
-      'textarea'
+      'textarea',
+      'div[role="textbox"]'
     ];
     for (const s of selectors) {
       const el = dialog.querySelector(s);
@@ -588,7 +652,10 @@
       if (!isVisible(btn)) continue;
       const txt = btn.innerText ? btn.innerText.trim() : '';
       if (sendKeywords.some(kw => txt === kw || txt.includes(kw))) {
-        if (txt.includes('返回') || txt.includes('Back') || txt.includes('返回评论')) continue;
+        // 必须排除“返回评论”、“返回”、“取消”
+        if (txt.includes('返回') || txt.includes('Back') || txt.includes('取消') || txt.includes('Cancel')) continue;
+        // 必须排除对话框顶部的标题“发消息给XXX”
+        if (txt.includes('发消息给') || txt.includes('Send message to')) continue;
         sendBtn = btn;
         break;
       }
@@ -599,6 +666,7 @@
         if (!isVisible(btn)) continue;
         const label = btn.getAttribute('aria-label') || '';
         if (sendKeywords.some(kw => label.includes(kw))) {
+          if (label.includes('返回') || label.includes('发消息给')) continue;
           sendBtn = btn;
           break;
         }
@@ -606,16 +674,26 @@
     }
 
     if (sendBtn) {
+      console.log("[Comments Manager Engine] 准备点击私信弹窗中的发送按钮:", sendBtn.innerText || sendBtn.getAttribute('aria-label'));
       sendBtn.click();
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 600));
       return true;
     }
     return false;
   }
 
   function closeDialog(dialog) {
-    const closeBtn = dialog.querySelector('div[aria-label="关闭"], div[aria-label="Close"], svg[aria-label="关闭"], button[aria-label="关闭"]');
-    if (closeBtn) closeBtn.click();
+    const closeBtn = dialog.querySelector('div[aria-label="关闭"], div[aria-label="Close"], svg[aria-label="关闭"], button[aria-label="关闭"], div[role="button"][aria-label*="close" i]');
+    if (closeBtn) {
+      closeBtn.click();
+    } else {
+      // 备用：点击“返回评论”
+      const backBtn = Array.from(dialog.querySelectorAll('div[role="button"], span')).find(el => {
+        const t = (el.innerText || '').trim();
+        return t === '返回评论' || t === 'Back';
+      });
+      if (backBtn) backBtn.click();
+    }
   }
 
   function findMatchingRule(commentText, rules) {
