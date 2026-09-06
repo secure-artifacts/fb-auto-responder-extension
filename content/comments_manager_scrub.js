@@ -1,12 +1,13 @@
 /**
- * FB 智能私信大师 - Comments Manager Content Script (v1.1.5)
+ * FB 智能私信大师 - Comments Manager Content Script (v1.2.0)
  * 专为 Facebook 专业面板【评论管理工具】打造的集中式极速私信引擎
  * 页面地址: https://www.facebook.com/professional_dashboard/engagement/comments_manager/
  *
- * v1.1.4 架构改变：
- *   不再尝试在当前页面点击弹窗（Facebook React 18 会检查 event.isTrusted 拒绝机器操作）
- *   改为提取【发消息】按钮的 href (Messenger 会话链接)，交由后台在新标签页中
- *   通过 chrome.scripting.executeScript 直接在 Messenger 页面填写并发送私信。
+ * 核心设计原则：
+ *   100% 还原人工操作：在当前页面找到【发消息】按钮 -> 点击展开私信弹窗 ->
+ *   在【发消息给 [UserName]】窗口中粘贴私信内容 -> 点击蓝色【发消息】发送 ->
+ *   关闭弹窗并等待防封间隔 -> 继续处理下一位留言用户！
+ *   杜绝打开外部分页，杜绝跳转，极简、原生、最稳定！
  */
 
 (async function () {
@@ -15,7 +16,7 @@
     return;
   }
 
-  console.log("[Comments Manager Engine v1.1.5] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.2.0] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;
@@ -83,14 +84,14 @@
       console.log(`[Comments Manager Engine] 扫描到 ${rows.length} 条待处理留言卡片`);
 
       if (rows.length === 0) {
-        // 当前首屏未发现，尝试微平滑滚动加载更多
+        // 当前首屏未发现，向下平滑滚动加载更多
         window.scrollBy({ top: 500, behavior: 'smooth' });
         await new Promise(r => setTimeout(r, 1500));
         rows = findCommentRows();
       }
 
       if (rows.length === 0) {
-        // 确实暂无可回复留言，滚动回到顶部，稍候再次巡检
+        // 确实暂无可回复留言，回到顶部，稍后巡检
         window.scrollTo({ top: 0, behavior: 'smooth' });
         const waitSec = Math.max(3, settings.notificationCheckInterval || 5);
         await StorageUtil.saveSettings({
@@ -193,14 +194,13 @@
           .replace(/\[名\]/g, firstName)
           .replace(/\{名\}/g, firstName);
 
-        // v1.1.4 核心改变：
-        // 通过后台在新的 Messenger 标签页中发送私信，完全绕开 isTrusted 限制
-        console.log(`[Comments Manager Engine] 通过 Messenger 标签页向 [${parsed.userName}] 发送私信...`);
-        
         // 视觉高亮改为绿色（表示正在发送）
         if (rowItem.container) rowItem.container.style.boxShadow = '0 0 0 2px #10b981';
+
+        console.log(`[Comments Manager Engine] 开始对用户 [${parsed.userName}] 执行原生弹窗私信...`);
         
-        const dmResult = await sendViaMessengerTab(parsed.messengerHref, parsed.userName, finalDmText);
+        // ★ 核心：执行原生弹窗私信（在当前页面直接点击、填写、发送）
+        const dmResult = await performNativeDialogDm(rowItem, parsed.userName, finalDmText);
 
         if (rowItem.container) rowItem.container.style.boxShadow = '';
 
@@ -282,52 +282,385 @@
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // v1.1.4 核心：通过后台在新 Messenger 标签页发送私信，完全绕开 isTrusted 问题
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // 核心原生弹窗私信引擎：点击【发消息】-> 弹窗 -> 输入 -> 发送 -> 关闭
+  // ===========================================================================
 
-  function sendViaMessengerTab(messengerHref, userName, dmText) {
-    return new Promise((resolve) => {
-      // 如果没有有效的 Messenger 链接，返回失败
-      if (!messengerHref || !messengerHref.includes('facebook.com/messages')) {
-        console.warn("[Comments Manager Engine] 未找到有效的 Messenger 链接，跳过:", messengerHref);
-        resolve({
+  async function performNativeDialogDm(rowItem, userName, dmText) {
+    try {
+      const container = rowItem.container;
+      const sendBtn = findSendMessageButton(container, rowItem.sendBtn);
+
+      if (!sendBtn) {
+        console.warn(`[Native DM] 未在卡片中定位到【发消息】按钮: ${userName}`);
+        return {
           success: false,
-          statusText: "⚠️ 跳过：未能从评论卡片提取到用户数字 ID（评论卡片可能尚未完全加载，或头像图片结构已更新）"
-        });
-        return;
+          statusText: "⚠️ 跳过：未定位到【发消息】按钮"
+        };
       }
 
-      const timeoutHandle = setTimeout(() => {
-        resolve({ success: false, statusText: "❌ 发送超时：Messenger 标签页操作超时（60 秒未完成）" });
-      }, 60000);
+      // 1. 关闭可能还残留的旧弹窗
+      const existingDialog = findOpenDmDialog();
+      if (existingDialog) {
+        closeDialog(existingDialog);
+        await new Promise(r => setTimeout(r, 400));
+      }
 
-      chrome.runtime.sendMessage({
-        action: "SEND_VIA_MESSENGER_TAB",
-        messengerHref: messengerHref,
-        userName: userName,
-        dmText: dmText
-      }, (response) => {
-        clearTimeout(timeoutHandle);
-        if (chrome.runtime.lastError) {
-          resolve({ success: false, statusText: "❌ 通信异常: " + chrome.runtime.lastError.message });
-          return;
-        }
-        if (response && response.success) {
-          resolve({ success: true, statusText: "✅ 私信发送成功（Messenger 标签页方式）" });
-        } else {
-          resolve({ success: false, statusText: "❌ 发送失败: " + (response ? response.error : "未知错误") });
-        }
-      });
-    });
+      // 2. 将【发消息】按钮平滑滚入视口中央
+      sendBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(r => setTimeout(r, 500));
+
+      // 3. 计算真实屏幕物理坐标并获取承接点击的顶层元素
+      const rect = sendBtn.getBoundingClientRect();
+      const clientX = Math.round(rect.left + rect.width / 2);
+      const clientY = Math.round(rect.top + rect.height / 2);
+      const hitTarget = document.elementFromPoint(clientX, clientY) || sendBtn;
+
+      console.log(`[Native DM] 准备点击【发消息】按钮，目标元素: ${sendBtn.tagName}, 顶层命中元素: ${hitTarget.tagName}`);
+
+      // 绝不删除 href！如果 target 是 _blank 则移除 target 防止多开窗口
+      if (sendBtn.getAttribute && sendBtn.getAttribute('target') === '_blank') {
+        sendBtn.removeAttribute('target');
+      }
+
+      // 4. 精准派发单次完整物理鼠标交互事件流
+      const evCommons = {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX: clientX,
+        clientY: clientY,
+        screenX: clientX + window.screenX,
+        screenY: clientY + window.screenY
+      };
+
+      try { hitTarget.focus(); } catch(e) {}
+
+      hitTarget.dispatchEvent(new PointerEvent('pointerover', { ...evCommons, pointerId: 1, pointerType: 'mouse' }));
+      hitTarget.dispatchEvent(new MouseEvent('mouseover', evCommons));
+      hitTarget.dispatchEvent(new PointerEvent('pointerdown', { ...evCommons, pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, pressure: 0.5 }));
+      hitTarget.dispatchEvent(new MouseEvent('mousedown', { ...evCommons, button: 0, buttons: 1 }));
+
+      // 模拟真人 80ms 按压
+      await new Promise(r => setTimeout(r, 80));
+
+      hitTarget.dispatchEvent(new PointerEvent('pointerup', { ...evCommons, pointerId: 1, pointerType: 'mouse', button: 0, buttons: 0 }));
+      hitTarget.dispatchEvent(new MouseEvent('mouseup', { ...evCommons, button: 0, buttons: 0 }));
+      hitTarget.dispatchEvent(new MouseEvent('click', { ...evCommons, button: 0, buttons: 0 }));
+
+      // 5. 等待私信弹窗展开 (首轮探测 2.5 秒)
+      let dialog = await waitForNativeDmDialog(2500);
+
+      // 若物理事件流未展开，尝试一级原生 targetBtn.click() 兜底 (仅当未打开时触发，杜绝双击闪退)
+      if (!dialog) {
+        console.log("[Native DM] 首轮事件流未展开，尝试 sendBtn.click() 一级兜底...");
+        sendBtn.click();
+        dialog = await waitForNativeDmDialog(2500);
+      }
+
+      // 若仍未展开，尝试 hitTarget.click() 二级兜底
+      if (!dialog && hitTarget !== sendBtn) {
+        console.log("[Native DM] 尝试 hitTarget.click() 二级兜底...");
+        hitTarget.click();
+        dialog = await waitForNativeDmDialog(2500);
+      }
+
+      if (!dialog) {
+        console.warn("[Native DM] 等待私信弹窗超时，未检测到弹窗");
+        return {
+          success: false,
+          statusText: "❌ 发送失败：未弹出私信窗口 (网络延迟或受 FB 频率限制)"
+        };
+      }
+
+      console.log("[Native DM] ✅ 私信弹窗已成功展开！寻找输入框...");
+
+      // 6. 定位弹窗中的输入框
+      const inputElem = findDialogInputField(dialog);
+      if (!inputElem) {
+        console.warn("[Native DM] 弹窗已展开，但未找到输入框");
+        closeDialog(dialog);
+        return {
+          success: false,
+          statusText: "❌ 发送失败：未定位到私信输入框"
+        };
+      }
+
+      // 7. 填写私信内容
+      console.log("[Native DM] 正在输入私信内容...");
+      await injectTextToInput(inputElem, dmText);
+      await new Promise(r => setTimeout(r, 800));
+
+      // 8. 点击弹窗中的蓝色【发消息】按钮
+      console.log("[Native DM] 正在点击弹窗中的【发消息】发送按钮...");
+      const sent = await clickDialogSendButton(dialog);
+
+      if (!sent) {
+        console.log("[Native DM] 未能点击发送按钮，尝试回车发送...");
+        inputElem.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
+        }));
+      }
+
+      // 9. 等待 2.5 秒确保网络请求已发送
+      await new Promise(r => setTimeout(r, 2500));
+
+      // 10. 检查弹窗是否仍处于打开状态，若仍打开则优雅关闭
+      const dialogStillOpen = document.contains(dialog) && isVisible(dialog);
+      if (dialogStillOpen) {
+        console.log("[Native DM] 发送完成，正在关闭弹窗...");
+        closeDialog(dialog);
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      console.log(`[Native DM] ✅ 成功向用户 [${userName}] 发送私信！`);
+      return {
+        success: true,
+        statusText: "✅ 私信发送成功"
+      };
+
+    } catch (e) {
+      console.error("[Native DM] performNativeDialogDm 发生异常:", e);
+      return {
+        success: false,
+        statusText: "❌ 发送异常: " + (e.message || "未知错误")
+      };
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // DOM 提取与解析辅助函数
+  // 弹窗与输入辅助函数
+  // ---------------------------------------------------------------------------
+
+  function findSendMessageButton(container, cachedBtn) {
+    const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
+
+    // 1. 若此前缓存的按钮有效且在 DOM 中
+    if (cachedBtn && document.contains(cachedBtn) && isVisible(cachedBtn)) {
+      return cachedBtn;
+    }
+
+    if (!container || !document.contains(container)) return null;
+
+    // 2. 优先找 role="button", a, button, span[role="button"]
+    const clickables = Array.from(container.querySelectorAll('div[role="button"], a[role="link"], a, button, span[role="button"]'));
+    for (const el of clickables) {
+      if (!isVisible(el)) continue;
+      const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+      if (sendKeywords.some(k => txt === k)) {
+        return el;
+      }
+    }
+
+    // 3. 找文本为【发消息】的叶子节点，向上找最近的可点击祖先
+    const allEls = Array.from(container.querySelectorAll('*'));
+    for (const el of allEls) {
+      if (el.children.length > 0) continue;
+      if (!isVisible(el)) continue;
+      const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+      if (sendKeywords.some(k => txt === k)) {
+        const parentBtn = el.closest('div[role="button"], a, button, span[role="button"]');
+        return parentBtn || el;
+      }
+    }
+
+    return null;
+  }
+
+  async function waitForNativeDmDialog(timeoutMs = 6000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const dialog = findOpenDmDialog();
+      if (dialog) return dialog;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    return null;
+  }
+
+  function findOpenDmDialog() {
+    const titleKeywords = ['发消息给', '发送消息给', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à'];
+    
+    // 方式 1: 标准 role="dialog" 或 aria-modal="true"
+    const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], div[aria-modal="true"]'));
+    for (const d of dialogs) {
+      if (!isVisible(d)) continue;
+      const txt = d.innerText || d.textContent || '';
+      if (titleKeywords.some(k => txt.includes(k))) {
+        return d;
+      }
+      if ((txt.includes('返回评论') || txt.includes('Back to comment') || txt.includes('Voltar ao comentário')) &&
+          d.querySelector('[contenteditable="true"], textarea')) {
+        return d;
+      }
+    }
+
+    // 方式 2: 兜底扫描包含"发消息给"标题的可见容器
+    const allDivs = Array.from(document.querySelectorAll('div'));
+    for (const d of allDivs) {
+      if (!isVisible(d)) continue;
+      const txt = d.innerText || '';
+      if (titleKeywords.some(k => txt.includes(k)) && 
+          (txt.includes('返回评论') || txt.includes('Messenger') || txt.includes('Back')) &&
+          d.querySelector('[contenteditable="true"], textarea')) {
+        return d;
+      }
+    }
+
+    return null;
+  }
+
+  function findDialogInputField(dialog) {
+    const selectors = [
+      '[contenteditable="true"][aria-multiline="true"]',
+      '[contenteditable="true"][role="textbox"]',
+      '[contenteditable="true"]',
+      'div[aria-label*="消息"][contenteditable]',
+      'div[aria-label*="Message"][contenteditable]',
+      'textarea',
+    ];
+    for (const s of selectors) {
+      const el = dialog.querySelector(s);
+      if (el && isVisible(el)) return el;
+    }
+    return null;
+  }
+
+  async function injectTextToInput(inputElem, text) {
+    inputElem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    inputElem.focus();
+    inputElem.click();
+    await new Promise(r => setTimeout(r, 200));
+
+    // 全选可能存在的占位文字
+    try {
+      document.execCommand('selectAll', false, null);
+    } catch(e) {}
+
+    let success = false;
+
+    // 尝试 1: ClipboardEvent paste (对 Facebook Lexical/Draft.js 最原生、最兼容)
+    try {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      const pasteEv = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt
+      });
+      inputElem.dispatchEvent(pasteEv);
+      await new Promise(r => setTimeout(r, 300));
+      const content = inputElem.textContent || inputElem.value || '';
+      if (content.includes(text.substring(0, Math.min(6, text.length)))) {
+        success = true;
+      }
+    } catch (e) {}
+
+    // 尝试 2: document.execCommand insertText
+    if (!success) {
+      try {
+        document.execCommand('insertText', false, text);
+        await new Promise(r => setTimeout(r, 300));
+        const content = inputElem.textContent || inputElem.value || '';
+        if (content.includes(text.substring(0, Math.min(6, text.length)))) {
+          success = true;
+        }
+      } catch (e) {}
+    }
+
+    // 尝试 3: TextEvent
+    if (!success) {
+      try {
+        const textEvent = document.createEvent('TextEvent');
+        textEvent.initTextEvent('textInput', true, true, window, text, 9, "en-US");
+        inputElem.dispatchEvent(textEvent);
+        await new Promise(r => setTimeout(r, 300));
+      } catch (e) {}
+    }
+
+    // 尝试 4: 暴力赋值 + Input 事件
+    if (!success) {
+      if (inputElem.tagName === 'TEXTAREA' || inputElem.tagName === 'INPUT') {
+        inputElem.value = text;
+      } else {
+        inputElem.innerText = text;
+      }
+      inputElem.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+      inputElem.dispatchEvent(new Event('input', { bubbles: true }));
+      inputElem.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  async function clickDialogSendButton(dialog) {
+    const sendKeywords = ['发消息', '发送消息', '发送', '發送', '發訊息', '傳送訊息', 'Send message', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan'];
+    const skipKeywords = ['返回', '取消', 'Back', 'Cancel', 'Voltar', '返回评论'];
+
+    const allButtons = Array.from(dialog.querySelectorAll('div[role="button"], a[role="link"], button, span[role="button"]'));
+    let sendBtn = null;
+
+    for (const btn of allButtons) {
+      if (!isVisible(btn)) continue;
+      const txt = (btn.innerText || btn.textContent || '').trim();
+      if (skipKeywords.some(k => txt.includes(k))) continue;
+      if (sendKeywords.some(kw => txt === kw || txt.includes(kw))) {
+        sendBtn = btn;
+        break;
+      }
+    }
+
+    if (!sendBtn) {
+      for (const btn of allButtons) {
+        if (!isVisible(btn)) continue;
+        const label = (btn.getAttribute('aria-label') || '').trim();
+        if (skipKeywords.some(k => label.includes(k))) continue;
+        if (sendKeywords.some(kw => label === kw || label.includes(kw))) {
+          sendBtn = btn;
+          break;
+        }
+      }
+    }
+
+    if (sendBtn) {
+      console.log("[Comments Manager Engine] 找到弹窗发送按钮:", sendBtn.innerText || sendBtn.getAttribute('aria-label'));
+
+      // 等待发送按钮解除禁用状态 (最多 3 秒)
+      const startWait = Date.now();
+      while (Date.now() - startWait < 3000) {
+        const isDisabled = sendBtn.getAttribute('aria-disabled') === 'true' || 
+                           sendBtn.disabled || 
+                           sendBtn.classList.contains('disabled');
+        if (!isDisabled) break;
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      // 仅调用一次 click()，防止 React 重复捕获
+      sendBtn.click();
+      await new Promise(r => setTimeout(r, 500));
+      return true;
+    }
+
+    return false;
+  }
+
+  function closeDialog(dialog) {
+    const closeBtn = dialog.querySelector('div[aria-label="关闭"], div[aria-label="Close"], svg[aria-label="关闭"], button[aria-label="关闭"]');
+    if (closeBtn) {
+      closeBtn.click();
+    } else {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // DOM 提取与列表解析辅助函数
   // ---------------------------------------------------------------------------
 
   function findCommentRows() {
     const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
+    
+    // 优先从可点击元素中寻找【发消息】按钮
     const allClickables = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], a[role="link"], a, button, span, div'));
     
     const sendButtons = allClickables.filter(el => {
@@ -346,6 +679,7 @@
 
       while (curr && curr !== document.body) {
         const text = curr.innerText || '';
+        // 包含时间标识和操作标识
         if ((text.includes('·') || text.includes('•') || /\d+\s*(小时|天|周|月|年|h|d|m)/i.test(text)) && 
             (text.includes('回复') || text.includes('Reply') || text.includes('隐藏') || text.includes('Hide') || text.includes('赞') || text.includes('Like'))) {
           const innerSendCount = Array.from(curr.querySelectorAll('*')).filter(el => {
@@ -373,77 +707,6 @@
     return rows;
   }
 
-  /**
-   * 从评论卡片中提取用户的 Facebook 数字 ID（10+ 位纯数字）
-   * 策略（优先级从高到低）：
-   *   1. 从 profile.php?id=XXXX URL 直接提取
-   *   2. 从用户头像 <img src> 中提取（Facebook CDN URL 永远包含数字用户 ID，最可靠）
-   *   3. 从 data-userid / data-id 等 HTML 属性提取
-   *   4. 从 <a href="/messages/t/XXXX"> 提取（如果恰好存在）
-   */
-  function extractNumericFbId(container, profileLink) {
-    // 方法 1: profile.php?id= 格式
-    if (profileLink) {
-      try {
-        const url = new URL(profileLink);
-        const idParam = url.searchParams.get('id');
-        if (idParam && /^\d{8,}$/.test(idParam)) {
-          console.log("[ID提取] 方法1 profile.php?id 成功:", idParam);
-          return idParam;
-        }
-      } catch(e) {}
-    }
-
-    // 方法 2: 头像 <img> src 中的 Facebook CDN 数字 ID（最可靠！）
-    // Facebook CDN URL 格式示例：
-    //   https://scontent-xxx.fbcdn.net/v/t39.30808-1/...100028XXXXXXXX_1234.jpg...
-    //   https://scontent.facebook.com/v/t1.6435-1/...p100x100/100028XXXXXXXX_...
-    const imgs = Array.from(container.querySelectorAll('img'));
-    for (const img of imgs) {
-      const src = img.src || img.getAttribute('src') || '';
-      if (!src || !src.includes('fbcdn')) continue;
-      // 匹配路径中 10 位以上的纯数字段（用户数字 ID 通常是 15 位）
-      const allMatches = [...src.matchAll(/[\/._-]?(\d{10,})[.\/]/g)];
-      for (const m of allMatches) {
-        const candidate = m[1];
-        // 过滤掉时间戳（Unix timestamp 10 位，但用户 ID 通常从 10000 开头或更长）
-        // Facebook 用户 ID 通常以 100 开头（10 位以上）
-        if (candidate.length >= 12 || (candidate.length >= 10 && candidate.startsWith('100'))) {
-          console.log("[ID提取] 方法2 avatar img src 成功:", candidate);
-          return candidate;
-        }
-      }
-    }
-
-    // 方法 3: data-userid / data-id 等 HTML 属性
-    for (const attr of ['data-userid', 'data-id', 'data-uid', 'data-profile-id']) {
-      const el = container.querySelector('[' + attr + ']');
-      if (el) {
-        const val = el.getAttribute(attr);
-        if (val && /^\d{8,}$/.test(val)) {
-          console.log("[ID提取] 方法3 data属性成功:", val, "attr:", attr);
-          return val;
-        }
-      }
-    }
-
-    // 方法 4: 容器内直接存在 messages href
-    const msgA = container.querySelector('a[href*="/messages/t/"], a[href*="messenger.com/t/"]');
-    if (msgA && msgA.href) {
-      const parts = msgA.href.split('/t/');
-      if (parts[1]) {
-        const candidate = parts[1].split(/[/?#]/)[0].replace('p_', '');
-        if (/^\d{8,}$/.test(candidate)) {
-          console.log("[ID提取] 方法4 messages href 成功:", candidate);
-          return candidate;
-        }
-      }
-    }
-
-    console.warn("[ID提取] 所有方法均未找到数字用户 ID");
-    return null;
-  }
-
   function parseCommentRow(rowObj) {
     const { container, sendBtn } = rowObj;
 
@@ -452,7 +715,6 @@
     let commentText = "";
     let profileLink = "";
     let postUrl = "";
-    let messengerHref = "";
 
     // 1. 查找所有链接
     const links = Array.from(container.querySelectorAll('a[href]'));
@@ -484,17 +746,6 @@
     }
 
     if (!profileLink && userLinks.length > 0) profileLink = userLinks[0].href;
-
-    // ★ v1.1.5: 提取数字用户 ID 并构造 Messenger 链接
-    // Facebook 的【发消息】按钮没有 href 属性（纯 React onClick），
-    // 所以我们从头像 img src 等来源提取数字 ID，自行构造 Messenger 会话 URL
-    const numericFbId = extractNumericFbId(container, profileLink);
-    if (numericFbId) {
-      messengerHref = `https://www.facebook.com/messages/t/${numericFbId}`;
-      console.log(`[Comments Manager Engine] 已构造 Messenger 链接: ${messengerHref}`);
-    } else {
-      console.warn("[Comments Manager Engine] ⚠️ 未能从评论卡片提取到数字用户 ID");
-    }
 
     // 2. 从文本行提取用户名、时间、留言内容
     const rawText = container.innerText || '';
@@ -553,16 +804,6 @@
       } catch (e) { fbId = profileLink; }
     }
 
-    // 从 Messenger href 提取用户 ID 作为兜底
-    if (!fbId && messengerHref) {
-      try {
-        const parts = new URL(messengerHref).pathname.split('/').filter(Boolean);
-        // /messages/t/USERID
-        const tIndex = parts.indexOf('t');
-        if (tIndex !== -1 && parts[tIndex + 1]) fbId = parts[tIndex + 1];
-      } catch (e) {}
-    }
-
     let pageId = "";
     if (postUrl) {
       try {
@@ -572,7 +813,7 @@
       } catch(e) {}
     }
 
-    return { userName, commentTime, commentText, profileLink, postUrl, fbId, pageId, sendBtn, messengerHref };
+    return { userName, commentTime, commentText, profileLink, postUrl, fbId, pageId, sendBtn };
   }
 
   function isHistoricalTime(timeStr) {
