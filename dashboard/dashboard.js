@@ -958,3 +958,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderLogs();
   updateStatusIndicator();
 });
+
+// 一键打开评论管理工具
+document.getElementById('btnOpenCommentsManagerFromDash')?.addEventListener('click', () => {
+  window.open("https://www.facebook.com/professional_dashboard/engagement/comments_manager/", "_blank");
+});

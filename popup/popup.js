@@ -143,3 +143,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const timer = setInterval(refreshUI, 1500);
   window.addEventListener('unload', () => clearInterval(timer));
 });
+
+// 一键打开评论管理工具
+document.getElementById('btnOpenCommentsManager')?.addEventListener('click', () => {
+  chrome.tabs.create({ url: "https://www.facebook.com/professional_dashboard/engagement/comments_manager/" });
+});

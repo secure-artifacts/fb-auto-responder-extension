@@ -11,8 +11,8 @@
   // 暴露全局接口供 notification_monitor.js 在通知页弹窗内调用
   window.FB_SCRUBBER = { startSingleRun };
 
-  // 如果当前在通知页面，默认不主动执行页面扫描（由 notification_monitor 点击打开浮层后按需调用）
-  if (window.location.pathname.startsWith('/notifications')) {
+  // 如果当前在通知页面或专业面板评论管理工具，由专属引擎处理，避免冲突
+  if (window.location.pathname.startsWith('/notifications') || window.location.pathname.includes('/comments_manager')) {
     return;
   }
 

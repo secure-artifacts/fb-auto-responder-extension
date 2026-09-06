@@ -49,6 +49,14 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
       sendResponse({ success: false, error: err.message });
     });
     return true; // 异步响应
+  } else if (req.action === "OPEN_COMMENTS_MANAGER") {
+    const cmUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
+    chrome.tabs.create({ url: cmUrl, active: true }, (tab) => {
+      chrome.tabs.update(tab.id, { autoDiscardable: false });
+      setWorkerState({ workerTabId: tab.id });
+    });
+    sendResponse({ status: "OPENED" });
+    return true;
   } else if (req.action === "TEST_GOOGLE_SHEET") {
     testGoogleSheetConnection(req.webhookUrl, req.sheetName).then(res => {
       sendResponse(res);
@@ -64,12 +72,13 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 
 async function startMonitoring() {
   const settings = await StorageUtil.getSettings();
-  let hasNotifications = settings.enableNotificationMode !== false;
+  let hasCommentsManager = settings.enableCommentsManagerMode !== false;
+  let hasNotifications = settings.enableNotificationMode === true;
   let hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
 
-  if (!hasNotifications && !hasTargets) {
-    hasNotifications = true;
-    await StorageUtil.saveSettings({ enableNotificationMode: true });
+  if (!hasCommentsManager && !hasNotifications && !hasTargets) {
+    hasCommentsManager = true;
+    await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
   }
   
   await StorageUtil.saveSettings({ isRunning: true, isPaused: false, emergencyBrakeReason: "" });
@@ -88,9 +97,20 @@ async function scheduleNextUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  const isNotificationMode = settings.enableNotificationMode !== false;
+  const isCommentsManagerMode = settings.enableCommentsManagerMode !== false;
+  const isNotificationMode = settings.enableNotificationMode === true && !isCommentsManagerMode;
 
-  // 如果开启了全主页通知流监控模式，单条贴文处理完毕后，自动返回通知中心继续守候
+  // 模式1：专业面板评论管理工具模式
+  if (isCommentsManagerMode) {
+    const waitSec = Math.max(2, settings.notificationCheckInterval || 5);
+    await StorageUtil.saveSettings({ statusMessage: `本批次已处理，${waitSec} 秒后继续扫描评论管理工具...` });
+    setTimeout(() => {
+      loadCurrentUrl();
+    }, waitSec * 1000);
+    return;
+  }
+
+  // 模式2：全主页通知流监控模式
   if (isNotificationMode) {
     const waitSec = Math.max(2, settings.notificationCheckInterval || 5);
     await StorageUtil.saveSettings({ statusMessage: `本条留言已处理完毕，${waitSec} 秒后返回全主页通知流...` });
@@ -128,12 +148,20 @@ async function loadCurrentUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  const isNotificationMode = settings.enableNotificationMode !== false;
+  const isCommentsManagerMode = settings.enableCommentsManagerMode !== false;
+  const isNotificationMode = settings.enableNotificationMode === true && !isCommentsManagerMode;
   let targetUrl = "";
   const state = await getWorkerState();
 
-  // 模式1：全主页通知流模式 (默认驻留 https://www.facebook.com/notifications)
-  if (isNotificationMode && !state.forceTargetUrl) {
+  // 模式1：专业面板评论管理工具模式 (默认推荐首选)
+  if (isCommentsManagerMode && !state.forceTargetUrl) {
+    targetUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
+    await StorageUtil.saveSettings({
+      statusMessage: "正在驻留专业面板【评论管理工具】，集中响应未回复留言...",
+      currentWorkerMode: 'comments_manager'
+    });
+  } else if (isNotificationMode && !state.forceTargetUrl) {
+    // 模式2：全主页通知流模式
     targetUrl = "https://www.facebook.com/notifications";
     await StorageUtil.saveSettings({
       statusMessage: "正在驻留全主页通知流，秒级监听未读留言...",
@@ -225,6 +253,7 @@ async function ensureWorkerTab(targetUrl) {
   // 如果 activeWorkerTab 已经失效，但在所有打开的标签页里找到了现成的 Facebook 页面，优先认领并复用！
   if (!activeWorkerTab && allFbTabs.length > 0) {
     const matchedTab = allFbTabs.find(t => t.url && stripUrl(t.url) === targetClean) ||
+                       allFbTabs.find(t => t.url && stripUrl(t.url).includes('/comments_manager')) ||
                        allFbTabs.find(t => t.url && stripUrl(t.url).includes('/notifications')) ||
                        allFbTabs[0];
     if (matchedTab) {
@@ -238,8 +267,9 @@ async function ensureWorkerTab(targetUrl) {
   if (allFbTabs.length > 1) {
     for (const t of allFbTabs) {
       if (activeWorkerTab && t.id === activeWorkerTab.id) continue;
-      if (t.url && stripUrl(t.url).includes('/notifications')) {
-        console.warn(`[Worker Tab Guard] 发现多余的通知标签页 ID ${t.id}，自动清理关闭，保持全局单标签！`);
+      const cleanU = stripUrl(t.url);
+      if (cleanU.includes('/notifications') || cleanU.includes('/comments_manager')) {
+        console.warn(`[Worker Tab Guard] 发现多余的工作标签页 ID ${t.id}，自动清理关闭，保持全局单标签！`);
         chrome.tabs.remove(t.id, () => {
           if (chrome.runtime.lastError) { /* ignore */ }
         });
@@ -264,7 +294,12 @@ async function ensureWorkerTab(targetUrl) {
 
     // 方案三：【避免硬 F5 刷新】
     if (currentClean === targetClean) {
-      if (targetClean.includes('/notifications')) {
+      if (targetClean.includes('/comments_manager')) {
+        console.log(`[Worker Tab Guard] 工作标签页已处于评论管理工具，通过页面内软巡检，禁止全页重载！`);
+        chrome.tabs.sendMessage(tabId, { action: "SOFT_REFRESH_COMMENTS_MANAGER" }, () => {
+          if (chrome.runtime.lastError) { /* ignore */ }
+        });
+      } else if (targetClean.includes('/notifications')) {
         console.log(`[Worker Tab Guard] 工作标签页已处于通知中心，通过页面内软刷新/软巡检，禁止全页重载！`);
         chrome.tabs.sendMessage(tabId, { action: "SOFT_REFRESH_NOTIFICATIONS" }, () => {
           if (chrome.runtime.lastError) { /* ignore */ }
