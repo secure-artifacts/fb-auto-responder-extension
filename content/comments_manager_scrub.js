@@ -1,5 +1,5 @@
 /**
- * FB 智能私信大师 - Comments Manager Content Script (v1.1.4)
+ * FB 智能私信大师 - Comments Manager Content Script (v1.1.5)
  * 专为 Facebook 专业面板【评论管理工具】打造的集中式极速私信引擎
  * 页面地址: https://www.facebook.com/professional_dashboard/engagement/comments_manager/
  *
@@ -15,7 +15,7 @@
     return;
   }
 
-  console.log("[Comments Manager Engine v1.1.4] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.1.5] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;
@@ -293,7 +293,7 @@
         console.warn("[Comments Manager Engine] 未找到有效的 Messenger 链接，跳过:", messengerHref);
         resolve({
           success: false,
-          statusText: "⚠️ 跳过：未提取到有效的 Messenger 会话链接（请确认【发消息】按钮含有 href 属性）"
+          statusText: "⚠️ 跳过：未能从评论卡片提取到用户数字 ID（评论卡片可能尚未完全加载，或头像图片结构已更新）"
         });
         return;
       }
@@ -373,6 +373,77 @@
     return rows;
   }
 
+  /**
+   * 从评论卡片中提取用户的 Facebook 数字 ID（10+ 位纯数字）
+   * 策略（优先级从高到低）：
+   *   1. 从 profile.php?id=XXXX URL 直接提取
+   *   2. 从用户头像 <img src> 中提取（Facebook CDN URL 永远包含数字用户 ID，最可靠）
+   *   3. 从 data-userid / data-id 等 HTML 属性提取
+   *   4. 从 <a href="/messages/t/XXXX"> 提取（如果恰好存在）
+   */
+  function extractNumericFbId(container, profileLink) {
+    // 方法 1: profile.php?id= 格式
+    if (profileLink) {
+      try {
+        const url = new URL(profileLink);
+        const idParam = url.searchParams.get('id');
+        if (idParam && /^\d{8,}$/.test(idParam)) {
+          console.log("[ID提取] 方法1 profile.php?id 成功:", idParam);
+          return idParam;
+        }
+      } catch(e) {}
+    }
+
+    // 方法 2: 头像 <img> src 中的 Facebook CDN 数字 ID（最可靠！）
+    // Facebook CDN URL 格式示例：
+    //   https://scontent-xxx.fbcdn.net/v/t39.30808-1/...100028XXXXXXXX_1234.jpg...
+    //   https://scontent.facebook.com/v/t1.6435-1/...p100x100/100028XXXXXXXX_...
+    const imgs = Array.from(container.querySelectorAll('img'));
+    for (const img of imgs) {
+      const src = img.src || img.getAttribute('src') || '';
+      if (!src || !src.includes('fbcdn')) continue;
+      // 匹配路径中 10 位以上的纯数字段（用户数字 ID 通常是 15 位）
+      const allMatches = [...src.matchAll(/[\/._-]?(\d{10,})[.\/]/g)];
+      for (const m of allMatches) {
+        const candidate = m[1];
+        // 过滤掉时间戳（Unix timestamp 10 位，但用户 ID 通常从 10000 开头或更长）
+        // Facebook 用户 ID 通常以 100 开头（10 位以上）
+        if (candidate.length >= 12 || (candidate.length >= 10 && candidate.startsWith('100'))) {
+          console.log("[ID提取] 方法2 avatar img src 成功:", candidate);
+          return candidate;
+        }
+      }
+    }
+
+    // 方法 3: data-userid / data-id 等 HTML 属性
+    for (const attr of ['data-userid', 'data-id', 'data-uid', 'data-profile-id']) {
+      const el = container.querySelector('[' + attr + ']');
+      if (el) {
+        const val = el.getAttribute(attr);
+        if (val && /^\d{8,}$/.test(val)) {
+          console.log("[ID提取] 方法3 data属性成功:", val, "attr:", attr);
+          return val;
+        }
+      }
+    }
+
+    // 方法 4: 容器内直接存在 messages href
+    const msgA = container.querySelector('a[href*="/messages/t/"], a[href*="messenger.com/t/"]');
+    if (msgA && msgA.href) {
+      const parts = msgA.href.split('/t/');
+      if (parts[1]) {
+        const candidate = parts[1].split(/[/?#]/)[0].replace('p_', '');
+        if (/^\d{8,}$/.test(candidate)) {
+          console.log("[ID提取] 方法4 messages href 成功:", candidate);
+          return candidate;
+        }
+      }
+    }
+
+    console.warn("[ID提取] 所有方法均未找到数字用户 ID");
+    return null;
+  }
+
   function parseCommentRow(rowObj) {
     const { container, sendBtn } = rowObj;
 
@@ -382,35 +453,6 @@
     let profileLink = "";
     let postUrl = "";
     let messengerHref = "";
-
-    // ★ v1.1.4 新增：提取【发消息】按钮的 Messenger href 链接
-    // 向上找到 <a href="https://www.facebook.com/messages/t/..."> 这样的链接元素
-    {
-      let btnEl = sendBtn;
-      // 向上最多 5 层找到含 href 的 <a> 元素
-      for (let step = 0; step < 5; step++) {
-        if (!btnEl) break;
-        if (btnEl.tagName === 'A' && btnEl.href && btnEl.href.includes('/messages/')) {
-          messengerHref = btnEl.href;
-          break;
-        }
-        // 也在兄弟节点中找
-        const aInParent = btnEl.parentElement ? btnEl.parentElement.querySelector('a[href*="/messages/"]') : null;
-        if (aInParent) {
-          messengerHref = aInParent.href;
-          break;
-        }
-        btnEl = btnEl.parentElement;
-      }
-
-      // 若还未找到，在整个 card container 中找
-      if (!messengerHref) {
-        const messengerA = container.querySelector('a[href*="/messages/t/"], a[href*="messenger.com/t/"]');
-        if (messengerA) messengerHref = messengerA.href;
-      }
-
-      console.log("[Comments Manager Engine] 提取到 Messenger 链接:", messengerHref || "(未找到)");
-    }
 
     // 1. 查找所有链接
     const links = Array.from(container.querySelectorAll('a[href]'));
@@ -442,6 +484,17 @@
     }
 
     if (!profileLink && userLinks.length > 0) profileLink = userLinks[0].href;
+
+    // ★ v1.1.5: 提取数字用户 ID 并构造 Messenger 链接
+    // Facebook 的【发消息】按钮没有 href 属性（纯 React onClick），
+    // 所以我们从头像 img src 等来源提取数字 ID，自行构造 Messenger 会话 URL
+    const numericFbId = extractNumericFbId(container, profileLink);
+    if (numericFbId) {
+      messengerHref = `https://www.facebook.com/messages/t/${numericFbId}`;
+      console.log(`[Comments Manager Engine] 已构造 Messenger 链接: ${messengerHref}`);
+    } else {
+      console.warn("[Comments Manager Engine] ⚠️ 未能从评论卡片提取到数字用户 ID");
+    }
 
     // 2. 从文本行提取用户名、时间、留言内容
     const rawText = container.innerText || '';
