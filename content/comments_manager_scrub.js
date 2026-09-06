@@ -1,5 +1,5 @@
 /**
- * FB 智能私信大师 - Comments Manager Content Script (v1.2.0)
+ * FB 智能私信大师 - Comments Manager Content Script (v1.2.1)
  * 专为 Facebook 专业面板【评论管理工具】打造的集中式极速私信引擎
  * 页面地址: https://www.facebook.com/professional_dashboard/engagement/comments_manager/
  *
@@ -16,7 +16,7 @@
     return;
   }
 
-  console.log("[Comments Manager Engine v1.2.0] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.2.1] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;
@@ -129,7 +129,7 @@
         }
 
         const commentKey = (parsed.userName + "_" + parsed.commentText).replace(/\s+/g, '_');
-        const userKey = parsed.userName;
+        const userKey = "usr_" + parsed.userName;
 
         // 设置项检查 1：是否处理历史留言 (超过24小时)
         if (!currentSettings.includeHistory && isHistoricalTime(parsed.commentTime)) {
@@ -144,15 +144,20 @@
           continue;
         }
 
-        if (processedComments[commentKey]) {
+        const isCommentAlreadyProcessed = Array.isArray(processedComments)
+          ? processedComments.includes(commentKey)
+          : !!processedComments[commentKey];
+        if (isCommentAlreadyProcessed) {
+          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 此条留言此前已处理过，跳过去重`);
           if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
-        // 设置项检查 3：全局用户冷却时间
+        // 设置项检查 3：全局用户冷却时间 (默认24小时)
         const userTouch = userHistory[userKey];
         if (cooldownHours > 0 && userTouch && userTouch.lastDmTime && (Date.now() - userTouch.lastDmTime < cooldownMs)) {
-          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 处于私信冷却期内，跳过`);
+          const remainingHours = Math.round((cooldownMs - (Date.now() - userTouch.lastDmTime)) / (3600 * 100) ) / 10;
+          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 处于私信冷却期内 (还剩约 ${remainingHours} 小时)，跳过防打扰`);
           if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
@@ -207,10 +212,18 @@
         // 记录状态
         sessionProcessedKeys.add(commentKey);
         await StorageUtil.markCommentProcessed(commentKey);
+        if (Array.isArray(processedComments) && !processedComments.includes(commentKey)) {
+          processedComments.push(commentKey);
+        }
         await StorageUtil.recordUserTouch(userKey, {
           userName: parsed.userName,
           dmSentSuccess: dmResult.success
         });
+        // 实时更新内存中的 userHistory，确保同批次后续来自同一用户的其他留言也能即刻被冷却拦截
+        userHistory[userKey] = {
+          userName: parsed.userName,
+          lastDmTime: dmResult.success ? Date.now() : (userTouch?.lastDmTime || 0)
+        };
 
         // 更新统计数据
         const stats = currentSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
@@ -782,6 +795,11 @@
 
     if (candidateLines.length > 0) {
       commentText = candidateLines.join(' ').trim();
+    }
+
+    // 清理留言开头的混入时间戳（如 "4分钟 Amém" -> "Amém"）
+    if (commentText) {
+      commentText = commentText.replace(/^(刚刚|\d+\s*(秒|分钟|小时|天|周|月|年|s|m|h|d|w|y|min|mins|hr|hrs|day|days))\s*[·•\s]*/i, '').trim();
     }
 
     if (!commentText) {
