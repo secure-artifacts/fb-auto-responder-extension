@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.2.1</span>
+          <span>Pro Studio v1.3.0</span>
         </div>
       </div>
 
@@ -214,11 +214,23 @@
                     <button class="btn btn-secondary btn-sm" id="btnResetUserHistory">🔄 一键清空去重历史 (用于重新测试)</button>
                   </div>
                   <small class="help-text">设定的时间内同一用户不重复触发。设为 <b>0</b> 代表禁用去重（测试时建议设为 0 或点击一键清空去重历史）。</small>
+                <div class="form-group" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                  <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--accent-cyan);">
+                    <input type="checkbox" id="checkEnableTimeWindowFilter">
+                    <span>⏱️ 开启时效过滤：仅回复最近时间窗口内的留言 (抢在线新客)</span>
+                  </label>
+                  <div id="timeWindowInputs" style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 13px;">最长时效上限:</span>
+                    <input type="number" id="inputMaxCommentAgeMinutes" class="form-input" min="1" max="1440" value="15" style="width: 80px;">
+                    <span style="font-size: 13px;">分钟</span>
+                    <span style="font-size: 12px; color: var(--text-muted);">(推荐设为 10~30 分钟，专抢当下在线意向用户；未勾选时默认新老兼顾)</span>
+                  </div>
                 </div>
+
                 <div class="form-group checkbox-group">
                   <label class="checkbox-label">
                     <input type="checkbox" id="checkIncludeHistory">
-                    <span>处理历史留言（打勾扫描过去超过24小时的旧留言，默认不打勾只处理新留言。测试时建议打勾！）</span>
+                    <span>处理历史留言（打勾扫描过去超过24小时的旧留言，默认不打勾绝不处理几天前的旧留言）</span>
                   </label>
                 </div>
                 <div class="form-group checkbox-group">

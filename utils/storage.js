@@ -24,6 +24,8 @@ const DEFAULT_SETTINGS = {
   enableNotificationMode: false, // 是否开启全主页通知流实时监控
   enableTargetUrlsMode: false, // 是否开启指定贴文列表循环监控
   notificationCheckInterval: 5, // 通知流检查与刷新间隔（秒）
+  enableTimeWindowFilter: false, // 是否开启时效过滤 (方案二：仅回复最近X分钟内留言)
+  maxCommentAgeMinutes: 15, // 时效过滤最大分钟数 (默认15分钟)
   statusMessage: "系统就绪，等待启动任务...",
   stats: {
     totalProcessed: 0,

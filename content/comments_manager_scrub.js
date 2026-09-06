@@ -1,22 +1,26 @@
 /**
- * FB 智能私信大师 - Comments Manager Content Script (v1.2.1)
+ * FB 智能私信大师 - Comments Manager Content Script (v1.3.0)
  * 专为 Facebook 专业面板【评论管理工具】打造的集中式极速私信引擎
  * 页面地址: https://www.facebook.com/professional_dashboard/engagement/comments_manager/
  *
- * 核心设计原则：
- *   100% 还原人工操作：在当前页面找到【发消息】按钮 -> 点击展开私信弹窗 ->
- *   在【发消息给 [UserName]】窗口中粘贴私信内容 -> 点击蓝色【发消息】发送 ->
- *   关闭弹窗并等待防封间隔 -> 继续处理下一位留言用户！
- *   杜绝打开外部分页，杜绝跳转，极简、原生、最稳定！
+ * v1.3.0 重大升级：
+ *   1. 【新客插队优先 / 抢鲜机制】(方案一，默认开启)：
+ *      每发完一条私信或在防封等待时，自动嗅探列表最顶部；发现刚进来的新留言立即优先插队处理，
+ *      抢占 1~3 分钟黄金转化期，发完新客再继续消化存量！
+ *   2. 【时效窗口拦截过滤】(方案二，可选设置)：
+ *      支持设置“仅回复最近 X 分钟内留言”（如 15 分钟），超过时效直接跳过，专攻在线活跃意向用户！
+ *   3. 【修复历史留言过滤】：
+ *      锚定留言者姓名精确提取评论时间，彻底杜绝误将帖子发布日期当做留言时间，严防回复几天前旧客！
+ *   4. 【双重 24 小时冷却保护】：
+ *      支持按“归一化姓名”和“数字 Facebook ID”双重冷却判定，并在内存实时同步，彻底杜绝 24H 内重复发送！
  */
 
 (async function () {
-  // 仅在专业面板评论管理工具生效
   if (!window.location.pathname.includes('/comments_manager')) {
     return;
   }
 
-  console.log("[Comments Manager Engine v1.2.1] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.3.0] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;
@@ -32,7 +36,6 @@
     }, seconds * 1000);
   }
 
-  // 监听来自后台的软巡检唤醒消息
   chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     if (req.action === "SOFT_REFRESH_COMMENTS_MANAGER" || req.action === "SOFT_REFRESH_NOTIFICATIONS") {
       console.log("[Comments Manager Engine] 收到软巡检唤醒指令...");
@@ -79,19 +82,17 @@
       // 1. 尝试确认并保持【你未回复】筛选器激活
       await ensureUnrepliedFilterActive();
 
-      // 2. 扫描并精准解析当前页面的所有留言卡片
+      // 2. 扫描当前页面的所有留言卡片
       let rows = findCommentRows();
       console.log(`[Comments Manager Engine] 扫描到 ${rows.length} 条待处理留言卡片`);
 
       if (rows.length === 0) {
-        // 当前首屏未发现，向下平滑滚动加载更多
         window.scrollBy({ top: 500, behavior: 'smooth' });
         await new Promise(r => setTimeout(r, 1500));
         rows = findCommentRows();
       }
 
       if (rows.length === 0) {
-        // 确实暂无可回复留言，回到顶部，稍后巡检
         window.scrollTo({ top: 0, behavior: 'smooth' });
         const waitSec = Math.max(3, settings.notificationCheckInterval || 5);
         await StorageUtil.saveSettings({
@@ -104,8 +105,8 @@
 
       // 3. 读取规则、冷却记录、历史记录
       const rules = await StorageUtil.getRules();
-      const processedComments = await StorageUtil.getProcessedComments();
-      const userHistory = await StorageUtil.getUserHistory();
+      let processedComments = await StorageUtil.getProcessedComments();
+      let userHistory = await StorageUtil.getUserHistory();
       const cooldownHours = settings.dmCooldownHours !== undefined
         ? settings.dmCooldownHours
         : (settings.globalCooldownHours !== undefined ? settings.globalCooldownHours : 24);
@@ -119,6 +120,19 @@
         if (!currentSettings.isRunning || currentSettings.isPaused) break;
         if (currentSettings.enableCommentsManagerMode === false) break;
 
+        // ★ v1.3.0 核心：顶部新客插队嗅探 (优先处理刚进来的新留言)
+        if (i > 0) {
+          const freshTopItem = await sniffTopForFreshComment(rules, processedComments, userHistory, currentSettings, cooldownMs);
+          if (freshTopItem) {
+            console.log(`🔥 [新客抢鲜插队] 发现列表顶部有新鲜留言 [${freshTopItem.parsed.userName}] (${freshTopItem.parsed.commentTime})，优先插队私信！`);
+            await processSingleCommentItem(freshTopItem.rowItem, freshTopItem.parsed, freshTopItem.matchResult, currentSettings, processedComments, userHistory);
+            processedCountInBatch++;
+            // 重新获取最新列表以防 DOM 偏移
+            rows = findCommentRows();
+            continue;
+          }
+        }
+
         const rowItem = rows[i];
         const parsed = parseCommentRow(rowItem);
 
@@ -129,16 +143,32 @@
         }
 
         const commentKey = (parsed.userName + "_" + parsed.commentText).replace(/\s+/g, '_');
-        const userKey = "usr_" + parsed.userName;
+        const normName = (parsed.userName || '').toLowerCase().trim();
+        const userKey = "usr_" + normName;
+        const idKey = parsed.fbId ? ("id_" + parsed.fbId) : null;
 
-        // 设置项检查 1：是否处理历史留言 (超过24小时)
-        if (!currentSettings.includeHistory && isHistoricalTime(parsed.commentTime)) {
-          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 留言为历史留言 (${parsed.commentTime})，已根据设置跳过`);
-          if (rowItem.container) rowItem.container.style.boxShadow = '';
-          continue;
+        // 设置项检查 1：时效窗口拦截 (方案二，可选设置)
+        if (currentSettings.enableTimeWindowFilter) {
+          const maxMinutes = currentSettings.maxCommentAgeMinutes || 15;
+          const ageMinutes = parseCommentAgeMinutes(parsed.commentTime);
+          if (ageMinutes > maxMinutes) {
+            console.log(`[时效过滤] 用户 [${parsed.userName}] 留言发布于 ${parsed.commentTime} (约 ${ageMinutes} 分钟前)，超过设定的 ${maxMinutes} 分钟时效上限，已自动跳过`);
+            if (rowItem.container) rowItem.container.style.boxShadow = '';
+            continue;
+          }
         }
 
-        // 设置项检查 2：查重（本会话已发、历史已发）
+        // 设置项检查 2：处理历史留言开关 (超过24小时或包含几天前)
+        if (!currentSettings.includeHistory) {
+          const isHistorical = isHistoricalTime(parsed.commentTime) || parseCommentAgeMinutes(parsed.commentTime) >= 1440;
+          if (isHistorical) {
+            console.log(`[历史留言过滤] 用户 [${parsed.userName}] 留言为历史旧留言 (${parsed.commentTime})，已根据设置跳过`);
+            if (rowItem.container) rowItem.container.style.boxShadow = '';
+            continue;
+          }
+        }
+
+        // 设置项检查 3：单条留言查重（本会话已发、历史已发）
         if (sessionProcessedKeys.has(commentKey)) {
           if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
@@ -148,21 +178,26 @@
           ? processedComments.includes(commentKey)
           : !!processedComments[commentKey];
         if (isCommentAlreadyProcessed) {
-          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 此条留言此前已处理过，跳过去重`);
           if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
-        // 设置项检查 3：全局用户冷却时间 (默认24小时)
-        const userTouch = userHistory[userKey];
-        if (cooldownHours > 0 && userTouch && userTouch.lastDmTime && (Date.now() - userTouch.lastDmTime < cooldownMs)) {
-          const remainingHours = Math.round((cooldownMs - (Date.now() - userTouch.lastDmTime)) / (3600 * 100) ) / 10;
-          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 处于私信冷却期内 (还剩约 ${remainingHours} 小时)，跳过防打扰`);
+        // 设置项检查 4：全局用户 24 小时冷却时间 (双重姓名与ID检索)
+        const userTouchByName = userHistory[userKey];
+        const userTouchById = idKey ? userHistory[idKey] : null;
+        const lastDmTime = Math.max(
+          userTouchByName?.lastDmTime || 0,
+          userTouchById?.lastDmTime || 0
+        );
+
+        if (cooldownHours > 0 && lastDmTime > 0 && (Date.now() - lastDmTime < cooldownMs)) {
+          const remainingHours = Math.round((cooldownMs - (Date.now() - lastDmTime)) / (3600 * 100)) / 10;
+          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 处于 24h 私信冷却期内 (还剩约 ${remainingHours} 小时)，跳过防打扰`);
           if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
-        // 设置项检查 4：关键词规则匹配
+        // 设置项检查 5：关键词规则匹配
         const matchResult = findMatchingRule(parsed.commentText, rules);
         if (!matchResult) {
           console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 留言 "${parsed.commentText}" 未匹配任何关键词规则，跳过`);
@@ -171,108 +206,11 @@
           continue;
         }
 
-        // 找到符合条件的留言，准备发送私信
-        await StorageUtil.saveSettings({
-          statusMessage: `正在私信 [${parsed.userName}]: 匹配 "${matchResult.matchedKeyword}"...`
-        });
-
-        const dmTemplate = getRandomItem(matchResult.rule.dmTemplates, parsed.userName);
-        if (!dmTemplate) {
-          console.warn("[Comments Manager Engine] 规则未配置私信话术模板");
-          sessionProcessedKeys.add(commentKey);
-          if (rowItem.container) rowItem.container.style.boxShadow = '';
-          continue;
-        }
-
-        // 占位符全面替换
-        const firstName = parsed.userName.split(' ')[0] || parsed.userName;
-        let finalDmText = dmTemplate
-          .replace(/\[Name\]/ig, parsed.userName)
-          .replace(/\{Name\}/ig, parsed.userName)
-          .replace(/\{userName\}/ig, parsed.userName)
-          .replace(/\[FullName\]/ig, parsed.userName)
-          .replace(/\{FullName\}/ig, parsed.userName)
-          .replace(/\[FirstName\]/ig, firstName)
-          .replace(/\{FirstName\}/ig, firstName)
-          .replace(/\[姓名\]/g, parsed.userName)
-          .replace(/\{姓名\}/g, parsed.userName)
-          .replace(/\[名\]/g, firstName)
-          .replace(/\{名\}/g, firstName);
-
-        // 视觉高亮改为绿色（表示正在发送）
-        if (rowItem.container) rowItem.container.style.boxShadow = '0 0 0 2px #10b981';
-
-        console.log(`[Comments Manager Engine] 开始对用户 [${parsed.userName}] 执行原生弹窗私信...`);
-        
-        // ★ 核心：执行原生弹窗私信（在当前页面直接点击、填写、发送）
-        const dmResult = await performNativeDialogDm(rowItem, parsed.userName, finalDmText);
-
-        if (rowItem.container) rowItem.container.style.boxShadow = '';
-
-        // 记录状态
-        sessionProcessedKeys.add(commentKey);
-        await StorageUtil.markCommentProcessed(commentKey);
-        if (Array.isArray(processedComments) && !processedComments.includes(commentKey)) {
-          processedComments.push(commentKey);
-        }
-        await StorageUtil.recordUserTouch(userKey, {
-          userName: parsed.userName,
-          dmSentSuccess: dmResult.success
-        });
-        // 实时更新内存中的 userHistory，确保同批次后续来自同一用户的其他留言也能即刻被冷却拦截
-        userHistory[userKey] = {
-          userName: parsed.userName,
-          lastDmTime: dmResult.success ? Date.now() : (userTouch?.lastDmTime || 0)
-        };
-
-        // 更新统计数据
-        const stats = currentSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
-        stats.totalProcessed += 1;
-        if (dmResult.success) stats.totalDmSent += 1;
-        else stats.totalErrors += 1;
-        await StorageUtil.saveSettings({ stats });
-
-        // 添加详细日志
-        await StorageUtil.addLog({
-          userName: parsed.userName,
-          commentText: parsed.commentText,
-          postUrl: parsed.postUrl || window.location.href,
-          profileLink: parsed.profileLink,
-          matchedKeyword: matchResult.matchedKeyword,
-          dmStatus: dmResult.statusText,
-          level: dmResult.success ? "info" : "error"
-        });
-
-        // 异步同步到 Google 表格 11 列标准字段
-        try {
-          const now = new Date();
-          const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-          const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-
-          const rowData = [
-            timeStr,
-            dateStr,
-            parsed.fbId || "",
-            parsed.userName,
-            parsed.profileLink || "",
-            parsed.postUrl || window.location.href,
-            parsed.commentText || "",
-            "FB评论管理工具",
-            matchResult.rule.name || matchResult.matchedKeyword,
-            parsed.commentTime || "刚刚",
-            parsed.pageId || ""
-          ];
-
-          chrome.runtime.sendMessage({ action: "SYNC_GOOGLE_SHEETS", payload: rowData }, () => {
-            if (chrome.runtime.lastError) { /* ignore */ }
-          });
-        } catch (e) {
-          console.warn("[Comments Manager Engine] 同步 Google Sheets 异常:", e);
-        }
-
+        // 执行单条私信处理
+        await processSingleCommentItem(rowItem, parsed, matchResult, currentSettings, processedComments, userHistory);
         processedCountInBatch++;
 
-        // 设置项检查 5：连续私信防封间隔时间 (秒)
+        // 连续私信防封间隔时间 (秒)
         const dmIntervalSec = currentSettings.dmIntervalSeconds !== undefined ? currentSettings.dmIntervalSeconds : 10;
         const dmIntervalMs = dmIntervalSec * 1000 + Math.floor(Math.random() * 2000);
         await StorageUtil.saveSettings({
@@ -293,6 +231,172 @@
       const waitSec = Math.max(3, settings.notificationCheckInterval || 5);
       scheduleNextPoll(waitSec);
     }
+  }
+
+  // ===========================================================================
+  // 单条留言处理主程序
+  // ===========================================================================
+
+  async function processSingleCommentItem(rowItem, parsed, matchResult, currentSettings, processedComments, userHistory) {
+    const commentKey = (parsed.userName + "_" + parsed.commentText).replace(/\s+/g, '_');
+    const normName = (parsed.userName || '').toLowerCase().trim();
+    const userKey = "usr_" + normName;
+    const idKey = parsed.fbId ? ("id_" + parsed.fbId) : null;
+
+    await StorageUtil.saveSettings({
+      statusMessage: `正在私信 [${parsed.userName}]: 匹配 "${matchResult.matchedKeyword}"...`
+    });
+
+    const dmTemplate = getRandomItem(matchResult.rule.dmTemplates, parsed.userName);
+    if (!dmTemplate) {
+      console.warn("[Comments Manager Engine] 规则未配置私信话术模板");
+      sessionProcessedKeys.add(commentKey);
+      if (rowItem.container) rowItem.container.style.boxShadow = '';
+      return;
+    }
+
+    const firstName = parsed.userName.split(' ')[0] || parsed.userName;
+    let finalDmText = dmTemplate
+      .replace(/\[Name\]/ig, parsed.userName)
+      .replace(/\{Name\}/ig, parsed.userName)
+      .replace(/\{userName\}/ig, parsed.userName)
+      .replace(/\[FullName\]/ig, parsed.userName)
+      .replace(/\{FullName\}/ig, parsed.userName)
+      .replace(/\[FirstName\]/ig, firstName)
+      .replace(/\{FirstName\}/ig, firstName)
+      .replace(/\[姓名\]/g, parsed.userName)
+      .replace(/\{姓名\}/g, parsed.userName)
+      .replace(/\[名\]/g, firstName)
+      .replace(/\{名\}/g, firstName);
+
+    if (rowItem.container) rowItem.container.style.boxShadow = '0 0 0 2px #10b981';
+
+    console.log(`[Comments Manager Engine] 开始对用户 [${parsed.userName}] 执行原生弹窗私信...`);
+    const dmResult = await performNativeDialogDm(rowItem, parsed.userName, finalDmText);
+
+    if (rowItem.container) rowItem.container.style.boxShadow = '';
+
+    // 记录状态
+    sessionProcessedKeys.add(commentKey);
+    await StorageUtil.markCommentProcessed(commentKey);
+    if (Array.isArray(processedComments) && !processedComments.includes(commentKey)) {
+      processedComments.push(commentKey);
+    }
+
+    // 记录触达并实时同步内存
+    const nowTs = dmResult.success ? Date.now() : 0;
+    await StorageUtil.recordUserTouch(userKey, {
+      userName: parsed.userName,
+      fbId: parsed.fbId || "",
+      dmSentSuccess: dmResult.success
+    });
+    userHistory[userKey] = { userName: parsed.userName, lastDmTime: nowTs };
+
+    if (idKey) {
+      await StorageUtil.recordUserTouch(idKey, {
+        userName: parsed.userName,
+        fbId: parsed.fbId,
+        dmSentSuccess: dmResult.success
+      });
+      userHistory[idKey] = { userName: parsed.userName, lastDmTime: nowTs };
+    }
+
+    // 更新统计数据
+    const stats = currentSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
+    stats.totalProcessed += 1;
+    if (dmResult.success) stats.totalDmSent += 1;
+    else stats.totalErrors += 1;
+    await StorageUtil.saveSettings({ stats });
+
+    // 添加详细日志
+    await StorageUtil.addLog({
+      userName: parsed.userName,
+      commentText: parsed.commentText,
+      postUrl: parsed.postUrl || window.location.href,
+      profileLink: parsed.profileLink,
+      matchedKeyword: matchResult.matchedKeyword,
+      dmStatus: dmResult.statusText,
+      level: dmResult.success ? "info" : "error"
+    });
+
+    // 异步同步到 Google 表格
+    try {
+      const now = new Date();
+      const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
+      const rowData = [
+        timeStr,
+        dateStr,
+        parsed.fbId || "",
+        parsed.userName,
+        parsed.profileLink || "",
+        parsed.postUrl || window.location.href,
+        parsed.commentText || "",
+        "FB评论管理工具",
+        matchResult.rule.name || matchResult.matchedKeyword,
+        parsed.commentTime || "刚刚",
+        parsed.pageId || ""
+      ];
+
+      chrome.runtime.sendMessage({ action: "SYNC_GOOGLE_SHEETS", payload: rowData }, () => {
+        if (chrome.runtime.lastError) { /* ignore */ }
+      });
+    } catch (e) {
+      console.warn("[Comments Manager Engine] 同步 Google Sheets 异常:", e);
+    }
+  }
+
+  // ===========================================================================
+  // v1.3.0: 顶部新客插队嗅探器 (Option 1)
+  // ===========================================================================
+
+  async function sniffTopForFreshComment(rules, processedComments, userHistory, currentSettings, cooldownMs) {
+    try {
+      const topRows = findCommentRows();
+      if (topRows.length === 0) return null;
+
+      // 仅嗅探前 2 条
+      for (let i = 0; i < Math.min(2, topRows.length); i++) {
+        const item = topRows[i];
+        const parsed = parseCommentRow(item);
+        if (!parsed || !parsed.userName || parsed.userName === "未知用户") continue;
+
+        const commentKey = (parsed.userName + "_" + parsed.commentText).replace(/\s+/g, '_');
+        if (sessionProcessedKeys.has(commentKey)) continue;
+
+        const isCommentAlreadyProcessed = Array.isArray(processedComments)
+          ? processedComments.includes(commentKey)
+          : !!processedComments[commentKey];
+        if (isCommentAlreadyProcessed) continue;
+
+        // 判定是否属于极度新鲜的新客 (5 分钟以内)
+        const ageMinutes = parseCommentAgeMinutes(parsed.commentTime);
+        if (ageMinutes > 5 && !isFreshTimeString(parsed.commentTime)) continue;
+
+        // 检查冷却
+        const normName = (parsed.userName || '').toLowerCase().trim();
+        const userKey = "usr_" + normName;
+        const idKey = parsed.fbId ? ("id_" + parsed.fbId) : null;
+        const lastDm = Math.max(userHistory[userKey]?.lastDmTime || 0, idKey ? (userHistory[idKey]?.lastDmTime || 0) : 0);
+        if (lastDm > 0 && (Date.now() - lastDm < cooldownMs)) continue;
+
+        // 检查关键词匹配
+        const matchResult = findMatchingRule(parsed.commentText, rules);
+        if (!matchResult) continue;
+
+        return { rowItem: item, parsed, matchResult };
+      }
+    } catch (e) {
+      console.warn("[Sniffer] 顶部新客嗅探异常:", e);
+    }
+    return null;
+  }
+
+  function isFreshTimeString(timeStr) {
+    if (!timeStr) return false;
+    const s = timeStr.trim().toLowerCase();
+    return /^(刚刚|just now|now|agora|d+s*(秒|s|sec|m|min|分|分钟))$/i.test(s);
   }
 
   // ===========================================================================
@@ -331,7 +435,6 @@
 
       console.log(`[Native DM] 准备点击【发消息】按钮，目标元素: ${sendBtn.tagName}, 顶层命中元素: ${hitTarget.tagName}`);
 
-      // 绝不删除 href！如果 target 是 _blank 则移除 target 防止多开窗口
       if (sendBtn.getAttribute && sendBtn.getAttribute('target') === '_blank') {
         sendBtn.removeAttribute('target');
       }
@@ -355,7 +458,6 @@
       hitTarget.dispatchEvent(new PointerEvent('pointerdown', { ...evCommons, pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, pressure: 0.5 }));
       hitTarget.dispatchEvent(new MouseEvent('mousedown', { ...evCommons, button: 0, buttons: 1 }));
 
-      // 模拟真人 80ms 按压
       await new Promise(r => setTimeout(r, 80));
 
       hitTarget.dispatchEvent(new PointerEvent('pointerup', { ...evCommons, pointerId: 1, pointerType: 'mouse', button: 0, buttons: 0 }));
@@ -365,14 +467,12 @@
       // 5. 等待私信弹窗展开 (首轮探测 2.5 秒)
       let dialog = await waitForNativeDmDialog(2500);
 
-      // 若物理事件流未展开，尝试一级原生 targetBtn.click() 兜底 (仅当未打开时触发，杜绝双击闪退)
       if (!dialog) {
         console.log("[Native DM] 首轮事件流未展开，尝试 sendBtn.click() 一级兜底...");
         sendBtn.click();
         dialog = await waitForNativeDmDialog(2500);
       }
 
-      // 若仍未展开，尝试 hitTarget.click() 二级兜底
       if (!dialog && hitTarget !== sendBtn) {
         console.log("[Native DM] 尝试 hitTarget.click() 二级兜底...");
         hitTarget.click();
@@ -449,14 +549,12 @@
   function findSendMessageButton(container, cachedBtn) {
     const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
 
-    // 1. 若此前缓存的按钮有效且在 DOM 中
     if (cachedBtn && document.contains(cachedBtn) && isVisible(cachedBtn)) {
       return cachedBtn;
     }
 
     if (!container || !document.contains(container)) return null;
 
-    // 2. 优先找 role="button", a, button, span[role="button"]
     const clickables = Array.from(container.querySelectorAll('div[role="button"], a[role="link"], a, button, span[role="button"]'));
     for (const el of clickables) {
       if (!isVisible(el)) continue;
@@ -466,7 +564,6 @@
       }
     }
 
-    // 3. 找文本为【发消息】的叶子节点，向上找最近的可点击祖先
     const allEls = Array.from(container.querySelectorAll('*'));
     for (const el of allEls) {
       if (el.children.length > 0) continue;
@@ -494,7 +591,6 @@
   function findOpenDmDialog() {
     const titleKeywords = ['发消息给', '发送消息给', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à'];
     
-    // 方式 1: 标准 role="dialog" 或 aria-modal="true"
     const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], div[aria-modal="true"]'));
     for (const d of dialogs) {
       if (!isVisible(d)) continue;
@@ -508,7 +604,6 @@
       }
     }
 
-    // 方式 2: 兜底扫描包含"发消息给"标题的可见容器
     const allDivs = Array.from(document.querySelectorAll('div'));
     for (const d of allDivs) {
       if (!isVisible(d)) continue;
@@ -545,14 +640,12 @@
     inputElem.click();
     await new Promise(r => setTimeout(r, 200));
 
-    // 全选可能存在的占位文字
     try {
       document.execCommand('selectAll', false, null);
     } catch(e) {}
 
     let success = false;
 
-    // 尝试 1: ClipboardEvent paste (对 Facebook Lexical/Draft.js 最原生、最兼容)
     try {
       const dt = new DataTransfer();
       dt.setData('text/plain', text);
@@ -569,7 +662,6 @@
       }
     } catch (e) {}
 
-    // 尝试 2: document.execCommand insertText
     if (!success) {
       try {
         document.execCommand('insertText', false, text);
@@ -581,7 +673,6 @@
       } catch (e) {}
     }
 
-    // 尝试 3: TextEvent
     if (!success) {
       try {
         const textEvent = document.createEvent('TextEvent');
@@ -591,7 +682,6 @@
       } catch (e) {}
     }
 
-    // 尝试 4: 暴力赋值 + Input 事件
     if (!success) {
       if (inputElem.tagName === 'TEXTAREA' || inputElem.tagName === 'INPUT') {
         inputElem.value = text;
@@ -637,7 +727,6 @@
     if (sendBtn) {
       console.log("[Comments Manager Engine] 找到弹窗发送按钮:", sendBtn.innerText || sendBtn.getAttribute('aria-label'));
 
-      // 等待发送按钮解除禁用状态 (最多 3 秒)
       const startWait = Date.now();
       while (Date.now() - startWait < 3000) {
         const isDisabled = sendBtn.getAttribute('aria-disabled') === 'true' || 
@@ -647,7 +736,6 @@
         await new Promise(r => setTimeout(r, 300));
       }
 
-      // 仅调用一次 click()，防止 React 重复捕获
       sendBtn.click();
       await new Promise(r => setTimeout(r, 500));
       return true;
@@ -672,8 +760,6 @@
 
   function findCommentRows() {
     const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
-    
-    // 优先从可点击元素中寻找【发消息】按钮
     const allClickables = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], a[role="link"], a, button, span, div'));
     
     const sendButtons = allClickables.filter(el => {
@@ -692,7 +778,6 @@
 
       while (curr && curr !== document.body) {
         const text = curr.innerText || '';
-        // 包含时间标识和操作标识
         if ((text.includes('·') || text.includes('•') || /\d+\s*(小时|天|周|月|年|h|d|m)/i.test(text)) && 
             (text.includes('回复') || text.includes('Reply') || text.includes('隐藏') || text.includes('Hide') || text.includes('赞') || text.includes('Like'))) {
           const innerSendCount = Array.from(curr.querySelectorAll('*')).filter(el => {
@@ -720,6 +805,9 @@
     return rows;
   }
 
+  /**
+   * 精确解析评论行：锚定留言者姓名提取评论时间和评论内容，彻底杜绝误读帖子日期
+   */
   function parseCommentRow(rowObj) {
     const { container, sendBtn } = rowObj;
 
@@ -751,7 +839,7 @@
       if (!rawA) continue;
       const namePart = rawA.split(/[·•]/)[0].trim();
       const actionWords = ['赞', '回复', '发消息', '隐藏', '...', 'Like', 'Reply', 'Send message', 'Hide'];
-      if (namePart.length > 0 && !actionWords.includes(namePart) && !namePart.includes('条评论') && namePart !== '没有文字内容') {
+      if (namePart.length > 0 && !actionWords.includes(namePart) && !namePart.includes('条评论') && !namePart.includes('comentários') && namePart !== '没有文字内容') {
         userName = namePart;
         profileLink = a.href;
         break;
@@ -760,36 +848,62 @@
 
     if (!profileLink && userLinks.length > 0) profileLink = userLinks[0].href;
 
-    // 2. 从文本行提取用户名、时间、留言内容
+    // 2. 文本行分析：锚定 用户名 所在行精确提取时间与内容
     const rawText = container.innerText || '';
     const lines = rawText.split('\n').map(s => s.trim()).filter(Boolean);
 
-    const dotLineIdx = lines.findIndex(l => (l.includes('·') || l.includes('•')) && !l.includes('条评论'));
-    if (dotLineIdx !== -1) {
-      const dotLine = lines[dotLineIdx];
-      const sep = dotLine.includes('·') ? '·' : '•';
-      const parts = dotLine.split(sep);
-
-      if (parts[0] && parts[0].trim() && userName === "未知用户") {
-        userName = parts[0].trim();
-      } else if (userName === "未知用户" && dotLineIdx > 0) {
-        const prevLine = lines[dotLineIdx - 1];
-        if (!['没有文字内容', '条评论'].some(k => prevLine.includes(k))) userName = prevLine;
-      }
-
-      if (parts[1] && parts[1].trim()) commentTime = parts[1].trim();
+    // 找到包含 用户名 的行索引
+    let userLineIdx = -1;
+    if (userName !== "未知用户") {
+      userLineIdx = lines.findIndex(l => l.includes(userName));
     }
 
-    // 3. 精准提取留言内容
+    if (userLineIdx !== -1) {
+      const uLine = lines[userLineIdx];
+      // 形式 A: "Beto Rockfeler · 18分钟"
+      if (uLine.includes('·') || uLine.includes('•')) {
+        const sep = uLine.includes('·') ? '·' : '•';
+        const parts = uLine.split(sep);
+        if (parts[1] && parts[1].trim()) {
+          commentTime = parts[1].trim();
+        }
+      } else if (lines.length > userLineIdx + 1) {
+        // 形式 B: 下一行是时间戳
+        const nextLine = lines[userLineIdx + 1];
+        if (isPossibleTimeLine(nextLine)) {
+          commentTime = nextLine;
+        }
+      }
+    } else {
+      // 兜底：寻找非帖子信息的包含 "·" 的时间行
+      const timeCandidateIdx = lines.findIndex(l => (l.includes('·') || l.includes('•')) && !l.includes('条评论') && !l.includes('comentário') && !l.includes('comment'));
+      if (timeCandidateIdx !== -1) {
+        const line = lines[timeCandidateIdx];
+        const sep = line.includes('·') ? '·' : '•';
+        const parts = line.split(sep);
+        if (parts[0] && parts[0].trim() && userName === "未知用户") {
+          userName = parts[0].trim();
+        }
+        if (parts[1] && parts[1].trim()) {
+          commentTime = parts[1].trim();
+        }
+      }
+    }
+
+    // 3. 精准提取留言内容（在时间之后、动作按钮之前）
     const actionWords = ['赞', '回复', '发消息', '隐藏', 'Like', 'Reply', 'Send message', 'Hide', '...'];
     const candidateLines = [];
-    let startCollecting = (dotLineIdx !== -1) ? (dotLineIdx + 1) : 1;
+    let startCollecting = (userLineIdx !== -1) ? (userLineIdx + 1) : 1;
 
     for (let i = startCollecting; i < lines.length; i++) {
       const line = lines[i];
       if (actionWords.includes(line)) break;
-      if (line === commentTime || line === userName) continue;
-      if (line.includes('条评论') || line === '没有文字内容') continue;
+      if (line === commentTime || line === userName || line.includes(userName)) continue;
+      if (line.includes('条评论') || line.includes('comentário') || line === '没有文字内容') continue;
+      if (isPossibleTimeLine(line)) {
+        if (commentTime === "刚刚") commentTime = line;
+        continue;
+      }
       candidateLines.push(line);
     }
 
@@ -797,7 +911,7 @@
       commentText = candidateLines.join(' ').trim();
     }
 
-    // 清理留言开头的混入时间戳（如 "4分钟 Amém" -> "Amém"）
+    // 清理可能混入的开头时间戳
     if (commentText) {
       commentText = commentText.replace(/^(刚刚|\d+\s*(秒|分钟|小时|天|周|月|年|s|m|h|d|w|y|min|mins|hr|hrs|day|days))\s*[·•\s]*/i, '').trim();
     }
@@ -834,17 +948,68 @@
     return { userName, commentTime, commentText, profileLink, postUrl, fbId, pageId, sendBtn };
   }
 
+  function isPossibleTimeLine(line) {
+    if (!line) return false;
+    const s = line.trim().toLowerCase();
+    if (/^(刚刚|just now|now|agora)$/.test(s)) return true;
+    if (/^\d+\s*(秒|分|分钟|小时|天|周|月|年|s|m|h|d|w|y|min|mins|hr|hrs|day|days|hora|horas|dia|dias|sem|semana|mês|meses|ano|anos)$/i.test(s)) return true;
+    if (/^(昨天|前天|yesterday|ontem|anteontem)/i.test(s)) return true;
+    return false;
+  }
+
+  /**
+   * 计算留言距离现在的分钟数
+   */
+  function parseCommentAgeMinutes(timeStr) {
+    if (!timeStr) return 0;
+    const s = timeStr.trim().toLowerCase();
+
+    if (/^(刚刚|just now|now|agora)/i.test(s)) return 0;
+
+    const secMatch = s.match(/^(\d+)\s*(秒|s|sec|seg)/i);
+    if (secMatch) return Math.round(parseInt(secMatch[1], 10) / 60);
+
+    const minMatch = s.match(/^(\d+)\s*(分|分钟|m|min)/i);
+    if (minMatch) return parseInt(minMatch[1], 10);
+
+    const hrMatch = s.match(/^(\d+)\s*(小时|h|hr|hora)/i);
+    if (hrMatch) return parseInt(hrMatch[1], 10) * 60;
+
+    const dayMatch = s.match(/^(\d+)\s*(天|d|day|dia)/i);
+    if (dayMatch) return parseInt(dayMatch[1], 10) * 1440;
+
+    if (/(昨天|yesterday|ontem)/i.test(s)) return 1440;
+    if (/(前天|anteontem)/i.test(s)) return 2880;
+
+    if (/(周|w|week|sem)/i.test(s)) return 10080;
+    if (/(月|mo|month|mês)/i.test(s)) return 43200;
+    if (/(年|y|year|ano)/i.test(s)) return 525600;
+
+    if (/\d{4}[-/.]|\d{1,2}[-/.]\d{1,2}/.test(s)) return 2880;
+
+    return 0;
+  }
+
+  /**
+   * 判定是否属于超过 24 小时的历史旧留言
+   */
   function isHistoricalTime(timeStr) {
     if (!timeStr) return false;
     const s = timeStr.trim().toLowerCase();
-    if (/刚刚|秒|分|小时/.test(s)) return false;
-    if (/\b\d+\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b/i.test(s)) return false;
-    if (/^(just now|now|\d+[smh])$/i.test(s)) return false;
+
+    if (/^(刚刚|just now|now|agora|moments ago)/i.test(s)) return false;
+    if (/^\d+\s*(秒|s|sec|secs|second|seconds|seg|segundos)$/i.test(s)) return false;
+    if (/^\d+\s*(分|分钟|m|min|mins|minute|minutes|minuto|minutos)$/i.test(s)) return false;
+    if (/^\d+\s*(小时|h|hr|hrs|hour|hours|hora|horas)$/i.test(s)) return false;
+
     if (/[天周月年]/.test(s)) return true;
+    if (/(昨天|前天|yesterday|ontem|anteontem)/i.test(s)) return true;
     if (/\b\d+\s*(d|day|days|w|week|weeks|mo|mon|month|months|y|yr|yrs|year|years)\b/i.test(s)) return true;
     if (/^\d+[dwy]$/i.test(s) || /^\d+mo$/i.test(s)) return true;
-    if (/(dia|sem|m[êe]s|ano)/i.test(s)) return true;
-    if (/\d{4}[-/.]|\d{1,2}[-/.]\d{1,2}|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(s)) return true;
+    if (/(dia|dias|sem|semana|semanas|mês|meses|mes|ano|anos)/i.test(s)) return true;
+    if (/\d{4}[-/.]|\d{1,2}[-/.]\d{1,2}/.test(s)) return true;
+    if (/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)/i.test(s)) return true;
+
     return false;
   }
 

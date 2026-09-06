@@ -488,6 +488,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const inputSwitchInterval = document.getElementById('inputSwitchInterval');
   const inputFillerWaitMin = document.getElementById('inputFillerWaitMin');
   const inputFillerWaitMax = document.getElementById('inputFillerWaitMax');
+  const checkEnableTimeWindowFilter = document.getElementById('checkEnableTimeWindowFilter');
+  const inputMaxCommentAgeMinutes = document.getElementById('inputMaxCommentAgeMinutes');
   const checkIncludeHistory = document.getElementById('checkIncludeHistory');
   const checkEmergencyBrake = document.getElementById('checkEmergencyBrake');
   const btnSaveAntiban = document.getElementById('btnSaveAntiban');
@@ -506,6 +508,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputSwitchInterval.value = settings.switchIntervalSeconds || 15;
     inputFillerWaitMin.value = settings.fillerWaitMin || 15;
     inputFillerWaitMax.value = settings.fillerWaitMax || 45;
+    if (checkEnableTimeWindowFilter) checkEnableTimeWindowFilter.checked = !!settings.enableTimeWindowFilter;
+    if (inputMaxCommentAgeMinutes) inputMaxCommentAgeMinutes.value = settings.maxCommentAgeMinutes || 15;
     if (checkIncludeHistory) checkIncludeHistory.checked = !!settings.includeHistory;
     if (checkEmergencyBrake) checkEmergencyBrake.checked = settings.emergencyBrakeEnabled !== false;
   }
@@ -521,6 +525,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const switchSec = parseInt(inputSwitchInterval.value, 10) || 15;
     const fillerMin = parseInt(inputFillerWaitMin.value, 10) || 15;
     const fillerMax = parseInt(inputFillerWaitMax.value, 10) || 45;
+    const enableTimeWindow = checkEnableTimeWindowFilter ? checkEnableTimeWindowFilter.checked : false;
+    const maxAgeMinutes = parseInt(inputMaxCommentAgeMinutes?.value, 10) || 15;
     const includeHistory = checkIncludeHistory ? checkIncludeHistory.checked : false;
     const emergencyBrake = checkEmergencyBrake ? checkEmergencyBrake.checked : true;
 
@@ -535,6 +541,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       switchIntervalSeconds: switchSec,
       fillerWaitMin: fillerMin,
       fillerWaitMax: Math.max(fillerMin, fillerMax),
+      enableTimeWindowFilter: enableTimeWindow,
+      maxCommentAgeMinutes: Math.max(1, maxAgeMinutes),
       includeHistory: includeHistory,
       emergencyBrakeEnabled: emergencyBrake
     });
@@ -551,6 +559,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   inputDmInterval.addEventListener('change', saveAntibanSettings);
   inputCooldown.addEventListener('change', saveAntibanSettings);
   inputSwitchInterval.addEventListener('change', saveAntibanSettings);
+  if (checkEnableTimeWindowFilter) checkEnableTimeWindowFilter.addEventListener('change', saveAntibanSettings);
+  if (inputMaxCommentAgeMinutes) inputMaxCommentAgeMinutes.addEventListener('change', saveAntibanSettings);
   if (checkIncludeHistory) checkIncludeHistory.addEventListener('change', saveAntibanSettings);
   if (checkEmergencyBrake) checkEmergencyBrake.addEventListener('change', saveAntibanSettings);
 
