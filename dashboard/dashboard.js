@@ -477,6 +477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnModalSave.addEventListener('click', saveRuleFromModal);
 
   // ==================== TAB 3: 防封与去重设置 ====================
+  const checkEnableCommentsManagerMode = document.getElementById('checkEnableCommentsManagerMode');
   const checkEnableNotificationMode = document.getElementById('checkEnableNotificationMode');
   const checkEnableTargetUrlsMode = document.getElementById('checkEnableTargetUrlsMode');
   const inputNotificationInterval = document.getElementById('inputNotificationInterval');
@@ -493,7 +494,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function loadAntibanSettings() {
     const settings = await StorageUtil.getSettings();
-    if (checkEnableNotificationMode) checkEnableNotificationMode.checked = settings.enableNotificationMode !== false;
+    if (checkEnableCommentsManagerMode) checkEnableCommentsManagerMode.checked = settings.enableCommentsManagerMode !== false;
+    if (checkEnableNotificationMode) checkEnableNotificationMode.checked = !!settings.enableNotificationMode;
     if (checkEnableTargetUrlsMode) checkEnableTargetUrlsMode.checked = !!settings.enableTargetUrlsMode;
     if (inputNotificationInterval) inputNotificationInterval.value = settings.notificationCheckInterval || 5;
 
@@ -507,7 +509,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function saveAntibanSettings() {
-    const enableNotif = checkEnableNotificationMode ? checkEnableNotificationMode.checked : true;
+    const enableCm = checkEnableCommentsManagerMode ? checkEnableCommentsManagerMode.checked : true;
+    const enableNotif = checkEnableNotificationMode ? checkEnableNotificationMode.checked : false;
     const enableTargets = checkEnableTargetUrlsMode ? checkEnableTargetUrlsMode.checked : false;
     const notifInterval = parseInt(inputNotificationInterval.value, 10) || 5;
 
@@ -520,6 +523,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const emergencyBrake = checkEmergencyBrake ? checkEmergencyBrake.checked : true;
 
     await StorageUtil.saveSettings({
+      enableCommentsManagerMode: enableCm,
       enableNotificationMode: enableNotif,
       enableTargetUrlsMode: enableTargets,
       notificationCheckInterval: Math.max(3, notifInterval),
@@ -538,6 +542,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (btnSaveAntiban) btnSaveAntiban.addEventListener('click', saveAntibanSettings);
+  if (checkEnableCommentsManagerMode) checkEnableCommentsManagerMode.addEventListener('change', saveAntibanSettings);
   if (checkEnableNotificationMode) checkEnableNotificationMode.addEventListener('change', saveAntibanSettings);
   if (checkEnableTargetUrlsMode) checkEnableTargetUrlsMode.addEventListener('change', saveAntibanSettings);
   if (inputNotificationInterval) inputNotificationInterval.addEventListener('change', saveAntibanSettings);

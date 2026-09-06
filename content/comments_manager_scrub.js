@@ -1,5 +1,5 @@
 /**
- * FB 智能私信大师 - Comments Manager Content Script (v1.1.1)
+ * FB 智能私信大师 - Comments Manager Content Script (v1.1.2)
  * 专为 Facebook 专业面板【评论管理工具】打造的集中式极速私信引擎
  * 页面地址: https://www.facebook.com/professional_dashboard/engagement/comments_manager/
  */
@@ -10,7 +10,7 @@
     return;
   }
 
-  console.log("[Comments Manager Engine] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.1.2] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;
@@ -55,7 +55,11 @@
       return;
     }
 
-    if (checkFacebookEmergencyBrake()) return;
+    if (settings.enableCommentsManagerMode === false && settings.enableNotificationMode === false) {
+      return;
+    }
+
+    if (checkFacebookEmergencyBrake(settings)) return;
 
     isProcessingLoop = true;
 
@@ -68,7 +72,7 @@
       // 1. 尝试确认并保持【你未回复】筛选器激活
       await ensureUnrepliedFilterActive();
 
-      // 2. 扫描并解析当前页面的所有留言行
+      // 2. 扫描并精准解析当前页面的所有留言卡片
       const rows = findCommentRows();
       console.log(`[Comments Manager Engine] 扫描到 ${rows.length} 条待处理留言卡片`);
 
@@ -98,34 +102,50 @@
       const rules = await StorageUtil.getRules();
       const processedComments = await StorageUtil.getProcessedComments();
       const userHistory = await StorageUtil.getUserHistory();
-      const cooldownHours = settings.dmCooldownHours || 24;
+      const cooldownHours = settings.dmCooldownHours !== undefined ? settings.dmCooldownHours : 24;
       const cooldownMs = cooldownHours * 3600 * 1000;
 
       let processedCountInBatch = 0;
 
       for (let i = 0; i < rows.length; i++) {
-        if (checkFacebookEmergencyBrake()) break;
+        if (checkFacebookEmergencyBrake(settings)) break;
         const currentSettings = await StorageUtil.getSettings();
         if (!currentSettings.isRunning || currentSettings.isPaused) break;
 
         const rowItem = rows[i];
         const parsed = parseCommentRow(rowItem);
 
+        // 视觉高亮当前正在检测的卡片
+        if (rowItem.container) {
+          rowItem.container.style.transition = 'box-shadow 0.3s ease';
+          rowItem.container.style.boxShadow = '0 0 0 2px #3b82f6';
+        }
+
         const commentKey = (parsed.userName + "_" + parsed.commentText).replace(/\s+/g, '_');
         const userKey = parsed.userName;
 
+        // 设置项检查：是否过滤历史留言（超过24小时）
+        if (!currentSettings.includeHistory && isHistoricalTime(parsed.commentTime)) {
+          console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 留言为历史留言 (${parsed.commentTime})，已根据设置跳过`);
+          if (rowItem.container) rowItem.container.style.boxShadow = '';
+          continue;
+        }
+
         // 查重：本会话已发、历史已发、或处于冷却期
         if (sessionProcessedKeys.has(commentKey)) {
+          if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
         if (processedComments[commentKey]) {
+          if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
         const userTouch = userHistory[userKey];
         if (userTouch && userTouch.lastDmTime && (Date.now() - userTouch.lastDmTime < cooldownMs)) {
           console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 处于私信冷却期内，跳过`);
+          if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
@@ -134,6 +154,7 @@
         if (!matchResult) {
           console.log(`[Comments Manager Engine] 用户 [${parsed.userName}] 留言 "${parsed.commentText}" 未匹配任何关键词规则，跳过`);
           sessionProcessedKeys.add(commentKey);
+          if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
@@ -146,18 +167,30 @@
         if (!dmTemplate) {
           console.warn("[Comments Manager Engine] 规则未配置私信话术模板");
           sessionProcessedKeys.add(commentKey);
+          if (rowItem.container) rowItem.container.style.boxShadow = '';
           continue;
         }
 
+        // 占位符全面替换 (支持 [Name], {userName}, {姓名}, [FirstName] 等多种格式)
         const firstName = parsed.userName.split(' ')[0];
-        const finalDmText = dmTemplate
+        let finalDmText = dmTemplate
           .replace(/\[Name\]/ig, parsed.userName)
+          .replace(/\{Name\}/ig, parsed.userName)
+          .replace(/\{userName\}/ig, parsed.userName)
           .replace(/\[FullName\]/ig, parsed.userName)
-          .replace(/\[FirstName\]/ig, firstName);
+          .replace(/\{FullName\}/ig, parsed.userName)
+          .replace(/\[FirstName\]/ig, firstName)
+          .replace(/\{FirstName\}/ig, firstName)
+          .replace(/\[姓名\]/g, parsed.userName)
+          .replace(/\{姓名\}/g, parsed.userName)
+          .replace(/\[名\]/g, firstName)
+          .replace(/\{名\}/g, firstName);
 
         // 执行原地唤起原生私信弹窗并发送
-        console.log(`[Comments Manager Engine] 开始向 [${parsed.userName}] 原地发送私信... 内容: "${finalDmText.substring(0, 30)}..."`);
+        console.log(`[Comments Manager Engine] 准备向 [${parsed.userName}] 原地发送私信... 内容: "${finalDmText.substring(0, 30)}..."`);
         const dmResult = await performNativeDialogDm(rowItem.sendBtn, parsed.userName, finalDmText);
+
+        if (rowItem.container) rowItem.container.style.boxShadow = '';
 
         // 记录状态
         sessionProcessedKeys.add(commentKey);
@@ -174,7 +207,7 @@
         else stats.totalErrors += 1;
         await StorageUtil.saveSettings({ stats });
 
-        // 添加详细日志 (包含 commentText 便于看板完整呈现)
+        // 添加详细日志 (完整包含 commentText 便于看板呈现)
         await StorageUtil.addLog({
           userName: parsed.userName,
           commentText: parsed.commentText,
@@ -214,16 +247,17 @@
 
         processedCountInBatch++;
 
-        // 连续私信防封间隔
-        const dmIntervalMs = (settings.dmIntervalSeconds || 10) * 1000 + Math.floor(Math.random() * 2000);
+        // 连续私信防封间隔 (读取设置)
+        const dmIntervalSec = currentSettings.dmIntervalSeconds !== undefined ? currentSettings.dmIntervalSeconds : 10;
+        const dmIntervalMs = dmIntervalSec * 1000 + Math.floor(Math.random() * 2000);
         await StorageUtil.saveSettings({
-          statusMessage: `已向 [${parsed.userName}] 发送私信，等待 ${Math.round(dmIntervalMs / 1000)} 秒后继续...`
+          statusMessage: `已向 [${parsed.userName}] 处理，等待 ${Math.round(dmIntervalMs / 1000)} 秒后继续...`
         });
         await new Promise(r => setTimeout(r, dmIntervalMs));
       }
 
       // 本轮遍历完成后，轻量向下滚动加载更多未回复
-      console.log(`[Comments Manager Engine] 当前视口批次处理完成，处理数: ${processedCountInBatch}，平滑滚动加载更多...`);
+      console.log(`[Comments Manager Engine] 当前批次处理完成，处理数: ${processedCountInBatch}，平滑滚动加载更多...`);
       window.scrollBy({ top: 600, behavior: 'smooth' });
       await new Promise(r => setTimeout(r, 1500));
 
@@ -242,38 +276,46 @@
 
   function findCommentRows() {
     const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
-    const allElements = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], a[role="button"], span, div, a'));
+    const allClickables = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], a[role="link"], a, button, span, div'));
     
-    // 查找所有文案包含【发消息】的按钮元素
-    const sendButtons = allElements.filter(el => {
+    // 1. 精准寻找【发消息】按钮（过滤掉子节点过多的巨大外壳）
+    const sendButtons = allClickables.filter(el => {
+      if (!isVisible(el)) return false;
       if (el.children.length > 2) return false;
       const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
       return sendKeywords.some(k => txt === k.toLowerCase());
     });
 
     const rows = [];
-    const visitedContainers = new Set();
+    const seenContainers = new Set();
 
     for (const btn of sendButtons) {
-      if (!isVisible(btn)) continue;
+      // 2. 向上寻找该按钮所属的【单条评论独立卡片容器】（严禁冒泡到整张列表表格！）
+      let curr = btn.parentElement;
+      let cardContainer = null;
 
-      // 向上查找该评论所在的卡片行容器
-      let parent = btn.parentElement;
-      let cardRow = null;
-      for (let i = 0; i < 9; i++) {
-        if (!parent) break;
-        const text = parent.innerText || '';
-        // 检查容器是否同时包含点赞/回复/隐藏，且有时间符号（· 或 •）
+      while (curr && curr !== document.body) {
+        const text = curr.innerText || '';
+        // 单条评论卡片必须包含时间符号（· 或 •）以及操作词（回复/隐藏/赞）
         if ((text.includes('·') || text.includes('•')) && (text.includes('回复') || text.includes('Reply') || text.includes('隐藏') || text.includes('Hide') || text.includes('赞') || text.includes('Like'))) {
-          cardRow = parent;
+          // 核心隔离判定：该容器内部包含的“发消息”按钮数不能超过 3（防止选到了整张大表格）
+          const innerSendCount = Array.from(curr.querySelectorAll('*')).filter(el => {
+            const t = (el.innerText || '').trim();
+            return t === '发消息' || t === 'Send message';
+          }).length;
+
+          if (innerSendCount <= 4) {
+            cardContainer = curr;
+            break; // 找到最近的单条卡片即刻终止，绝不继续向上扩散！
+          }
         }
-        parent = parent.parentElement;
+        curr = curr.parentElement;
       }
 
-      if (cardRow && !visitedContainers.has(cardRow)) {
-        visitedContainers.add(cardRow);
+      if (cardContainer && !seenContainers.has(cardContainer)) {
+        seenContainers.add(cardContainer);
         rows.push({
-          container: cardRow,
+          container: cardContainer,
           sendBtn: btn
         });
       }
@@ -291,7 +333,7 @@
     let profileLink = "";
     let postUrl = "";
 
-    // 1. 查找所有超链接
+    // 1. 查找所有链接
     const links = Array.from(container.querySelectorAll('a[href]'));
     
     // 贴文链接特征
@@ -311,7 +353,7 @@
       return true;
     });
 
-    // 关键优化：优先寻找包含真实文本的链接作为用户名，避免选中无文字的头像 <a>
+    // 优先提取包含真实姓名文本的 <a> 链接，排除无文本的头像 <a>
     const textUserLink = userLinks.find(a => {
       const t = (a.innerText || a.textContent || '').trim();
       return t.length > 0 && !t.includes('·') && !['赞', '回复', '发消息', '隐藏', '...'].includes(t);
@@ -328,7 +370,7 @@
     const rawText = container.innerText || '';
     const lines = rawText.split('\n').map(s => s.trim()).filter(Boolean);
 
-    // 寻找带 "·" 或 "•" 的那一行
+    // 寻找带 "·" 或 "•" 的那一行（排除“2条评论”这类贴文行）
     const dotLineIdx = lines.findIndex(l => (l.includes('·') || l.includes('•')) && !l.includes('条评论'));
     if (dotLineIdx !== -1) {
       const dotLine = lines[dotLineIdx];
@@ -340,7 +382,7 @@
           userName = parts[0].trim();
         }
       } else if (userName === "未知用户" && dotLineIdx > 0) {
-        // 如果点符号前无文本，说明上一行就是作者名
+        // 点符号前面无文本，说明上一行就是作者名
         const prevLine = lines[dotLineIdx - 1];
         if (!['没有文字内容', '条评论'].some(k => prevLine.includes(k))) {
           userName = prevLine;
@@ -351,7 +393,7 @@
         commentTime = parts[1].trim();
       }
 
-      // 提取留言内容：紧跟在作者行之后，在操作按钮之前
+      // 提取留言内容：紧随作者行之后，在操作按钮（赞/回复/发消息/隐藏）之前
       const actionWords = ['赞', '回复', '发消息', '隐藏', 'Like', 'Reply', 'Send message', 'Hide', '...'];
       for (let i = dotLineIdx + 1; i < lines.length; i++) {
         const line = lines[i];
@@ -417,6 +459,14 @@
     };
   }
 
+  function isHistoricalTime(timeStr) {
+    if (!timeStr) return false;
+    return ['天', '周', '月', '年', 'd', 'w', 'm', 'y'].some(unit => {
+      const regex = new RegExp(`\\d+\\s*${unit}`, 'i');
+      return regex.test(timeStr);
+    });
+  }
+
   async function ensureUnrepliedFilterActive() {
     try {
       const allButtons = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], div[role="tab"], button, span'));
@@ -441,7 +491,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 原生私信弹窗交互引擎
+  // 原生私信弹窗交互引擎 (高度强化点击与弹窗捕获)
   // ---------------------------------------------------------------------------
 
   async function performNativeDialogDm(sendMsgBtn, userName, dmText) {
@@ -457,33 +507,55 @@
         await new Promise(r => setTimeout(r, 500));
       }
 
-      // 2. 关键优化：精准定位真正具备点击事件的最外层按钮容器（div[role="button"] 或 a）
-      const actualClickable = sendMsgBtn.closest('div[role="button"]') || 
-                              sendMsgBtn.closest('a') || 
-                              sendMsgBtn.closest('button') || 
-                              sendMsgBtn;
-
-      // 绝不能删除 href 或 target，Facebook React 依赖这些属性识别路由和对话实体！
+      // 2. 定位真实具备点击事件的按钮容器
+      const targetBtn = sendMsgBtn.closest('[role="button"], a, button, [tabindex="0"]') || sendMsgBtn;
 
       // 滚动至屏幕居中
-      actualClickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      targetBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
       await new Promise(r => setTimeout(r, 500));
 
-      console.log(`[Comments Manager Engine] 正在点击【发消息】按钮: 标签=${actualClickable.tagName}, role=${actualClickable.getAttribute('role')}`);
+      // 视觉高亮绿框提示用户（所见即所得）
+      const originalOutline = targetBtn.style.outline;
+      targetBtn.style.outline = '3px solid #10b981';
+      setTimeout(() => { targetBtn.style.outline = originalOutline; }, 2500);
 
-      // 3. 多层次派发真实人类指针与点击事件
-      const simulateHumanClick = (target) => {
-        const opts = { bubbles: true, cancelable: true, view: window };
-        target.dispatchEvent(new PointerEvent('pointerdown', opts));
-        target.dispatchEvent(new MouseEvent('mousedown', opts));
-        target.dispatchEvent(new PointerEvent('pointerup', opts));
-        target.dispatchEvent(new MouseEvent('mouseup', opts));
-        target.click();
+      console.log(`[Comments Manager Engine] 正在对 [${userName}] 执行【发消息】物理点击... 目标标签: ${targetBtn.tagName}`);
+
+      // 3. 计算真实坐标派发完整事件
+      const rect = targetBtn.getBoundingClientRect();
+      const clientX = rect.left + rect.width / 2;
+      const clientY = rect.top + rect.height / 2;
+
+      const mouseOpts = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: clientX,
+        clientY: clientY,
+        buttons: 1
       };
 
-      simulateHumanClick(actualClickable);
-      if (sendMsgBtn !== actualClickable) {
-        simulateHumanClick(sendMsgBtn);
+      const triggerClick = (el) => {
+        el.focus();
+        if (el.tagName === 'A') {
+          el.removeAttribute('target');
+          const hrefBackup = el.getAttribute('href');
+          el.removeAttribute('href'); // 临时移除 href 杜绝原生导航跳转，完全交由 React 事件处理
+          el.dispatchEvent(new MouseEvent('mousedown', mouseOpts));
+          el.dispatchEvent(new MouseEvent('mouseup', mouseOpts));
+          el.dispatchEvent(new MouseEvent('click', mouseOpts));
+          if (hrefBackup) setTimeout(() => { el.setAttribute('href', hrefBackup); }, 2000);
+        } else {
+          el.dispatchEvent(new MouseEvent('mousedown', mouseOpts));
+          el.dispatchEvent(new MouseEvent('mouseup', mouseOpts));
+          el.dispatchEvent(new MouseEvent('click', mouseOpts));
+          el.click();
+        }
+      };
+
+      triggerClick(targetBtn);
+      if (sendMsgBtn !== targetBtn) {
+        triggerClick(sendMsgBtn);
       }
 
       // 4. 等待原生私信弹窗展开（最多 8 秒）
@@ -541,16 +613,15 @@
     }
   }
 
-  async function waitForNativeDmDialog(timeoutMs) {
+  async function waitForNativeDmDialog(timeoutMs = 8000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      // 方式 1: 查询标准 role="dialog" 或 aria-modal
+      // 方式 1: 标准 role="dialog" 容器
       const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], div[aria-modal="true"]'));
       for (const d of dialogs) {
         if (!isVisible(d)) continue;
         const text = d.innerText || '';
-        const titleKeys = ['发消息给', '发送消息给', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à'];
-        if (titleKeys.some(k => text.includes(k))) {
+        if (text.includes('发消息给') || text.includes('Send message to') || text.includes('Enviar mensagem para') || (text.includes('以') && text.includes('身份发消息'))) {
           return d;
         }
         const hasInput = d.querySelector('[contenteditable="true"], textarea');
@@ -560,18 +631,25 @@
       }
 
       // 方式 2: 基于标题文本逆向寻找弹窗卡片容器
-      const allTextNodes = Array.from(document.querySelectorAll('h1, h2, h3, h4, span, div'));
-      const headerEl = allTextNodes.find(el => {
+      const allTextNodes = Array.from(document.querySelectorAll('h1, h2, h3, h4, span, div')).filter(el => {
         if (el.children.length > 2) return false;
         const t = (el.innerText || '').trim();
-        return t.startsWith('发消息给') || t.startsWith('Send message to') || t.startsWith('Enviar mensagem');
+        return t.startsWith('发消息给') || t.startsWith('Send message to') || t.startsWith('Enviar mensagem para');
       });
-      if (headerEl) {
-        const modal = headerEl.closest('div[role="dialog"]') || 
-                      headerEl.closest('div[aria-modal="true"]') || 
-                      headerEl.parentElement?.parentElement?.parentElement;
+      if (allTextNodes.length > 0) {
+        const h = allTextNodes[0];
+        const modal = h.closest('div[role="dialog"]') || h.closest('div[aria-modal="true"]') || h.parentElement?.parentElement?.parentElement;
         if (modal && isVisible(modal)) {
           return modal;
+        }
+      }
+
+      // 方式 3: 直接探测输入框反查弹窗
+      const inputs = Array.from(document.querySelectorAll('[contenteditable="true"], textarea')).filter(isVisible);
+      for (const inp of inputs) {
+        const p = inp.closest('div[role="dialog"]') || inp.closest('div[aria-modal="true"]') || inp.parentElement?.parentElement?.parentElement;
+        if (p && (p.innerText || '').includes('发消息')) {
+          return p;
         }
       }
 
@@ -585,8 +663,8 @@
       '[contenteditable="true"][aria-multiline="true"]',
       '[contenteditable="true"][role="textbox"]',
       '[contenteditable="true"]',
-      'textarea',
-      'div[role="textbox"]'
+      'div[role="textbox"]',
+      'textarea'
     ];
     for (const s of selectors) {
       const el = dialog.querySelector(s);
@@ -602,9 +680,17 @@
     inputElem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     inputElem.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
     inputElem.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 300));
 
-    // 尝试 1: ClipboardEvent (Paste)
+    // 尝试 1: document.execCommand (在输入框聚焦状态下最贴合原生输入)
+    try {
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertText', false, text);
+      await new Promise(r => setTimeout(r, 300));
+      if (inputElem.textContent && inputElem.textContent.includes(text.substring(0, 5))) return;
+    } catch (e) {}
+
+    // 尝试 2: ClipboardEvent (Paste)
     try {
       const dataTransfer = new DataTransfer();
       dataTransfer.setData('text/plain', text);
@@ -614,16 +700,7 @@
         cancelable: true
       });
       inputElem.dispatchEvent(pasteEvent);
-      await new Promise(r => setTimeout(r, 400));
-      if (inputElem.textContent && inputElem.textContent.includes(text.substring(0, 5))) return;
-    } catch (e) {}
-
-    // 尝试 2: document.execCommand
-    try {
-      inputElem.focus();
-      document.execCommand('selectAll', false, null);
-      document.execCommand('insertText', false, text);
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 300));
       if (inputElem.textContent && inputElem.textContent.includes(text.substring(0, 5))) return;
     } catch (e) {}
 
@@ -632,7 +709,7 @@
       const textEvent = document.createEvent('TextEvent');
       textEvent.initTextEvent('textInput', true, true, window, text, 9, "en-US");
       inputElem.dispatchEvent(textEvent);
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 300));
       if (inputElem.textContent && inputElem.textContent.includes(text.substring(0, 5))) return;
     } catch (e) {}
 
@@ -640,7 +717,7 @@
     inputElem.innerText = text;
     inputElem.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     inputElem.dispatchEvent(new Event('input', { bubbles: true }));
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 300));
   }
 
   async function clickDialogSendButton(dialog) {
@@ -650,7 +727,7 @@
 
     for (const btn of allButtons) {
       if (!isVisible(btn)) continue;
-      const txt = btn.innerText ? btn.innerText.trim() : '';
+      const txt = (btn.innerText || btn.textContent || '').trim();
       if (sendKeywords.some(kw => txt === kw || txt.includes(kw))) {
         // 必须排除“返回评论”、“返回”、“取消”
         if (txt.includes('返回') || txt.includes('Back') || txt.includes('取消') || txt.includes('Cancel')) continue;
@@ -675,6 +752,16 @@
 
     if (sendBtn) {
       console.log("[Comments Manager Engine] 准备点击私信弹窗中的发送按钮:", sendBtn.innerText || sendBtn.getAttribute('aria-label'));
+      
+      const isDisabled = sendBtn.getAttribute('aria-disabled') === 'true' || sendBtn.disabled || sendBtn.classList.contains('disabled');
+      if (isDisabled) {
+        console.warn("[Comments Manager Engine] 发送按钮处于禁用状态，等待 1 秒响应内容输入...");
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      sendBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      sendBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
       sendBtn.click();
       await new Promise(r => setTimeout(r, 600));
       return true;
@@ -687,7 +774,6 @@
     if (closeBtn) {
       closeBtn.click();
     } else {
-      // 备用：点击“返回评论”
       const backBtn = Array.from(dialog.querySelectorAll('div[role="button"], span')).find(el => {
         const t = (el.innerText || '').trim();
         return t === '返回评论' || t === 'Back';
@@ -726,7 +812,8 @@
     return style.display !== 'none' && style.visibility !== 'hidden';
   }
 
-  function checkFacebookEmergencyBrake() {
+  function checkFacebookEmergencyBrake(settings) {
+    if (settings && settings.emergencyBrakeEnabled === false) return false;
     const pageText = document.body ? document.body.innerText : "";
     const warningKeywords = ["验证码", "Security Check Required", "您已被限制使用此功能", "You're Temporarily Blocked", "Action Blocked"];
     for (const kw of warningKeywords) {
