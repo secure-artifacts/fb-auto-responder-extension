@@ -27,6 +27,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (targetTab === 'tab-sheets') renderGoogleSheets();
       if (targetTab === 'tab-logs') renderLogs();
       if (targetTab === 'tab-urls') loadUrls();
+      if (targetTab === 'tab-antiban') loadAntibanSettings();
+      if (targetTab === 'tab-rules') renderRules();
     });
   });
 
@@ -80,12 +82,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   topBtnStart.addEventListener('click', async () => {
     const settings = await StorageUtil.getSettings();
-    let hasNotifications = settings.enableNotificationMode !== false;
-    let hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+    const hasCommentsManager = settings.enableCommentsManagerMode !== false;
+    const hasNotifications = settings.enableNotificationMode === true;
+    const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
 
-    if (!hasNotifications && !hasTargets) {
-      hasNotifications = true;
-      await StorageUtil.saveSettings({ enableNotificationMode: true });
+    if (!hasCommentsManager && !hasNotifications && !hasTargets) {
+      await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
     }
     await StorageUtil.saveSettings({ isRunning: true, isPaused: false, statusMessage: "正在启动自动化监控..." });
     chrome.runtime.sendMessage({ action: "START_MONITOR" });

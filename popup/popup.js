@@ -89,13 +89,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   btnStart.addEventListener('click', async () => {
     const settings = await StorageUtil.getSettings();
-    let hasNotifications = settings.enableNotificationMode !== false;
-    let hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+    const hasCommentsManager = settings.enableCommentsManagerMode !== false;
+    const hasNotifications = settings.enableNotificationMode === true;
+    const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
 
-    // 如果未配置贴文且未配置通知，默认直接按通知流全主页监控启动
-    if (!hasNotifications && !hasTargets) {
-      hasNotifications = true;
-      await StorageUtil.saveSettings({ enableNotificationMode: true });
+    // 若均未勾选，默认按推荐的评论管理工具模式启动
+    if (!hasCommentsManager && !hasNotifications && !hasTargets) {
+      await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
     }
 
     await StorageUtil.saveSettings({
