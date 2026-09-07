@@ -72,10 +72,17 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 // ── 核心调度逻辑 ────────────────────────────────────────────────────────────
 
 async function startMonitoring() {
+  const settings = await StorageUtil.getSettings();
+  const hasCm = settings.enableCommentsManagerMode !== false;
+  const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+
+  if (!hasCm && !hasTargets) {
+    await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
+  }
+
   await StorageUtil.saveSettings({
     isRunning: true,
     isPaused: false,
-    enableCommentsManagerMode: true,
     emergencyBrakeReason: ""
   });
   loadCurrentUrl();
@@ -127,11 +134,45 @@ async function loadCurrentUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  const targetUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
-  await StorageUtil.saveSettings({
-    statusMessage: "正在驻留专业面板【评论管理工具】，集中响应未回复留言...",
-    currentWorkerMode: 'comments_manager'
-  });
+  const isCm = settings.enableCommentsManagerMode !== false;
+  const isTargets = settings.enableTargetUrlsMode === true && settings.targetUrls && settings.targetUrls.length > 0;
+  let targetUrl = "";
+  const state = await getWorkerState();
+
+  if (isTargets && !state.forceTargetUrl && (!isCm || state.currentWorkerMode === 'target' || state.currentWorkerMode === 'filler')) {
+    // 模式 B: 指定贴文循环模式 (或前台单贴文一键监控)
+    const targets = settings.targetUrls || [];
+    const fillers = settings.activeUrls || [];
+    let currentUrlIndex = state.currentUrlIndex || 0;
+    let isNextFiller = state.isNextFiller;
+
+    if (isNextFiller && fillers.length > 0 && settings.enableFillerUrls !== false) {
+      targetUrl = fillers[Math.floor(Math.random() * fillers.length)];
+      await StorageUtil.saveSettings({
+        statusMessage: `正在访问伪装链接 (防封浏览): ${targetUrl.substring(0, 45)}...`,
+        currentWorkerMode: 'filler'
+      });
+      await setWorkerState({ isNextFiller: false, lastFillerUrl: targetUrl });
+    } else {
+      if (currentUrlIndex >= targets.length) {
+        currentUrlIndex = 0;
+        await setWorkerState({ currentUrlIndex });
+      }
+      targetUrl = targets[currentUrlIndex];
+      await StorageUtil.saveSettings({
+        statusMessage: `正在监控指定贴文 [${currentUrlIndex + 1}/${targets.length}]: ${targetUrl.substring(0, 45)}...`,
+        currentWorkerMode: 'target'
+      });
+      await setWorkerState({ isNextFiller: true });
+    }
+  } else {
+    // 模式 A: 专业面板评论管理工具模式 (默认首选)
+    targetUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
+    await StorageUtil.saveSettings({
+      statusMessage: "正在驻留专业面板【评论管理工具】，集中响应未回复留言...",
+      currentWorkerMode: 'comments_manager'
+    });
+  }
 
   // 统一交给单标签安全调度守卫处理（查重、防多开、防休眠、防硬刷）
   await ensureWorkerTab(targetUrl);

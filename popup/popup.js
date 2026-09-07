@@ -88,11 +88,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   btnStart.addEventListener('click', async () => {
+    const settings = await StorageUtil.getSettings();
+    const hasCm = settings.enableCommentsManagerMode !== false;
+    const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
+
+    if (!hasCm && !hasTargets) {
+      await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
+    }
+
     await StorageUtil.saveSettings({
       isRunning: true,
       isPaused: false,
-      enableCommentsManagerMode: true,
-      statusMessage: "🚀 正在启动评论管理工具自动化监控..."
+      statusMessage: "🚀 正在启动自动化监控..."
     });
 
     sendMessageSafe({ action: "START_MONITOR" });
