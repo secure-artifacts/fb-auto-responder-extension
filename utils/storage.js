@@ -21,9 +21,8 @@ const DEFAULT_SETTINGS = {
   emergencyBrakeEnabled: true,
   emergencyBrakeReason: "",
   enableCommentsManagerMode: true, // 是否开启专业面板【评论管理工具】监控 (首选)
-  enableNotificationMode: false, // 是否开启全主页通知流实时监控
   enableTargetUrlsMode: false, // 是否开启指定贴文列表循环监控
-  notificationCheckInterval: 5, // 通知流检查与刷新间隔（秒）
+  notificationCheckInterval: 15, // 空闲自动刷新间隔（秒，默认15秒）
   enableTimeWindowFilter: false, // 是否开启时效过滤 (方案二：仅回复最近X分钟内留言)
   maxCommentAgeMinutes: 15, // 时效过滤最大分钟数 (默认15分钟)
   statusMessage: "系统就绪，等待启动任务...",

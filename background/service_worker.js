@@ -72,17 +72,12 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 // ── 核心调度逻辑 ────────────────────────────────────────────────────────────
 
 async function startMonitoring() {
-  const settings = await StorageUtil.getSettings();
-  let hasCommentsManager = settings.enableCommentsManagerMode !== false;
-  let hasNotifications = settings.enableNotificationMode === true;
-  let hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
-
-  if (!hasCommentsManager && !hasNotifications && !hasTargets) {
-    hasCommentsManager = true;
-    await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
-  }
-  
-  await StorageUtil.saveSettings({ isRunning: true, isPaused: false, emergencyBrakeReason: "" });
+  await StorageUtil.saveSettings({
+    isRunning: true,
+    isPaused: false,
+    enableCommentsManagerMode: true,
+    emergencyBrakeReason: ""
+  });
   loadCurrentUrl();
 }
 
@@ -98,28 +93,11 @@ async function scheduleNextUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  const isCommentsManagerMode = settings.enableCommentsManagerMode !== false;
-  const isNotificationMode = settings.enableNotificationMode === true && !isCommentsManagerMode;
-
-  // 模式1：专业面板评论管理工具模式
-  if (isCommentsManagerMode) {
-    const waitSec = Math.max(2, settings.notificationCheckInterval || 5);
-    await StorageUtil.saveSettings({ statusMessage: `本批次已处理，${waitSec} 秒后继续扫描评论管理工具...` });
-    setTimeout(() => {
-      loadCurrentUrl();
-    }, waitSec * 1000);
-    return;
-  }
-
-  // 模式2：全主页通知流监控模式
-  if (isNotificationMode) {
-    const waitSec = Math.max(2, settings.notificationCheckInterval || 5);
-    await StorageUtil.saveSettings({ statusMessage: `本条留言已处理完毕，${waitSec} 秒后返回全主页通知流...` });
-    setTimeout(() => {
-      loadCurrentUrl();
-    }, waitSec * 1000);
-    return;
-  }
+  // 核心聚焦：专业面板评论管理工具
+  const waitSec = Math.max(5, settings.notificationCheckInterval || 15);
+  setTimeout(() => {
+    loadCurrentUrl();
+  }, waitSec * 1000);
 
   // 纯指定贴文循环监控模式
   const urls = settings.targetUrls || [];
@@ -149,67 +127,11 @@ async function loadCurrentUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  const isCommentsManagerMode = settings.enableCommentsManagerMode !== false;
-  const isNotificationMode = settings.enableNotificationMode === true && !isCommentsManagerMode;
-  let targetUrl = "";
-  const state = await getWorkerState();
-
-  // 模式1：专业面板评论管理工具模式 (默认推荐首选)
-  if (isCommentsManagerMode && !state.forceTargetUrl) {
-    targetUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
-    await StorageUtil.saveSettings({
-      statusMessage: "正在驻留专业面板【评论管理工具】，集中响应未回复留言...",
-      currentWorkerMode: 'comments_manager'
-    });
-  } else if (isNotificationMode && !state.forceTargetUrl) {
-    // 模式2：全主页通知流模式
-    targetUrl = "https://www.facebook.com/notifications";
-    await StorageUtil.saveSettings({
-      statusMessage: "正在驻留全主页通知流，秒级监听未读留言...",
-      currentWorkerMode: 'notification'
-    });
-  } else {
-    // 模式2：经典指定贴文循环模式
-    const targets = settings.targetUrls || [];
-    const fillers = settings.activeUrls || [];
-
-    if (targets.length === 0) {
-      if (isNotificationMode) {
-        await setWorkerState({ forceTargetUrl: false });
-        loadCurrentUrl();
-        return;
-      }
-      return;
-    }
-
-    let currentUrlIndex = state.currentUrlIndex;
-    let isNextFiller = state.isNextFiller;
-
-    if (isNextFiller && fillers.length > 0 && settings.enableFillerUrls !== false) {
-      targetUrl = fillers[Math.floor(Math.random() * fillers.length)];
-      if (fillers.length > 1 && state.lastFillerUrl === targetUrl) {
-        const currentIndex = fillers.indexOf(targetUrl);
-        targetUrl = fillers[(currentIndex + 1) % fillers.length];
-      }
-      
-      await StorageUtil.saveSettings({
-        statusMessage: `正在访问伪装链接 (防封浏览): ${targetUrl.substring(0, 45)}...`,
-        currentWorkerMode: 'filler'
-      });
-      await setWorkerState({ isNextFiller: false, lastFillerUrl: targetUrl });
-    } else {
-      if (currentUrlIndex >= targets.length) {
-        currentUrlIndex = 0;
-        await setWorkerState({ currentUrlIndex });
-      }
-      targetUrl = targets[currentUrlIndex];
-      await StorageUtil.saveSettings({
-        statusMessage: `正在监控 [${currentUrlIndex + 1}/${targets.length}]: ${targetUrl.substring(0, 45)}...`,
-        currentWorkerMode: 'target'
-      });
-      await setWorkerState({ isNextFiller: true });
-    }
-  }
+  const targetUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
+  await StorageUtil.saveSettings({
+    statusMessage: "正在驻留专业面板【评论管理工具】，集中响应未回复留言...",
+    currentWorkerMode: 'comments_manager'
+  });
 
   // 统一交给单标签安全调度守卫处理（查重、防多开、防休眠、防硬刷）
   await ensureWorkerTab(targetUrl);
@@ -296,13 +218,7 @@ async function ensureWorkerTab(targetUrl) {
     // 方案三：【避免硬 F5 刷新】
     if (currentClean === targetClean) {
       if (targetClean.includes('/comments_manager')) {
-        console.log(`[Worker Tab Guard] 工作标签页已处于评论管理工具，通过页面内软巡检，禁止全页重载！`);
         chrome.tabs.sendMessage(tabId, { action: "SOFT_REFRESH_COMMENTS_MANAGER" }, () => {
-          if (chrome.runtime.lastError) { /* ignore */ }
-        });
-      } else if (targetClean.includes('/notifications')) {
-        console.log(`[Worker Tab Guard] 工作标签页已处于通知中心，通过页面内软刷新/软巡检，禁止全页重载！`);
-        chrome.tabs.sendMessage(tabId, { action: "SOFT_REFRESH_NOTIFICATIONS" }, () => {
           if (chrome.runtime.lastError) { /* ignore */ }
         });
       } else {

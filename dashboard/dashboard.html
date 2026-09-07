@@ -14,7 +14,7 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.3.0</span>
+          <span>Pro Studio v1.4.0</span>
         </div>
       </div>
 
@@ -149,31 +149,20 @@
             <div class="card-body">
               <div class="form-grid">
 
-                <div class="form-group full-width-group" style="grid-column: 1 / -1; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 14px 16px; margin-bottom: 8px;">
-                  <h4 style="margin: 0 0 10px 0; color: var(--accent-cyan); font-size: 14px; font-weight: 700;">📡 监控工作模式与通知流配置 (支持按需勾选或组合)</h4>
-                  <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <label class="checkbox-label" style="font-weight: 700; color: #10b981;">
-                      <input type="checkbox" id="checkEnableCommentsManagerMode" checked>
-                      <span>开启专业面板【评论管理工具】监控 (🚀 强烈推荐：直接集中私信，免进贴文零报错)</span>
-                    </label>
-                    <label class="checkbox-label" style="font-weight: 600;">
-                      <input type="checkbox" id="checkEnableNotificationMode">
-                      <span>开启全主页通知流实时监控 (自动监听 notifications 页面并跳转处理)</span>
-                    </label>
-                    <label class="checkbox-label">
-                      <input type="checkbox" id="checkEnableTargetUrlsMode">
-                      <span>开启指定贴文列表循环监控 (轮流巡检目标贴文管理中填写的指定链接)</span>
-                    </label>
-                  </div>
-                  <div style="margin-top: 8px;">
-                    <button type="button" class="btn btn-sm" id="btnOpenCommentsManagerFromDash" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;">
-                      🔗 一键打开专业面板【评论管理工具】页面
+                <div class="form-group full-width-group" style="grid-column: 1 / -1; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 16px; margin-bottom: 8px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                    <h4 style="margin: 0; color: #10b981; font-size: 15px; font-weight: 700;">🎯 核心监控阵地：Facebook 专业面板【评论管理工具】</h4>
+                    <button type="button" class="btn btn-sm" id="btnOpenCommentsManagerFromDash" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+                      🔗 一键打开评论管理工具页面
                     </button>
                   </div>
-                  <div style="margin-top: 12px; display: flex; align-items: center; gap: 12px;">
-                    <label style="font-size: 13px; font-weight: 600;">通知流检查刷新间隔:</label>
-                    <input type="number" id="inputNotificationInterval" class="form-input" min="3" max="120" value="5" style="width: 80px;">
-                    <span style="font-size: 13px; color: var(--text-muted);">秒 (推荐：白天抢客户可设为 <b>3~5</b> 秒，夜间可调至 10~15 秒)</span>
+                  <p style="margin: 0 0 12px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+                    系统专注于在评论管理工具中运行。通过页面内原生弹窗直接私信，零页面跳转，杜绝风控拦截，默认开启新客插队优先秒发。
+                  </p>
+                  <div style="display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.15); padding: 10px 14px; border-radius: 6px;">
+                    <label style="font-size: 13px; font-weight: 600; white-space: nowrap;">🔄 空闲自动刷新间隔:</label>
+                    <input type="number" id="inputNotificationInterval" class="form-input" min="5" max="300" value="15" style="width: 80px;">
+                    <span style="font-size: 13px; color: var(--text-muted);">秒 (当页面全部留言回复完进入空闲等待时，设定的秒数后自动刷新页面，向 Facebook 服务器同步拉取最新进来的新留言并秒级回复。推荐：<b>10~20</b> 秒)</span>
                   </div>
                 </div>
 

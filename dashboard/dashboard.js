@@ -81,15 +81,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   topBtnStart.addEventListener('click', async () => {
-    const settings = await StorageUtil.getSettings();
-    const hasCommentsManager = settings.enableCommentsManagerMode !== false;
-    const hasNotifications = settings.enableNotificationMode === true;
-    const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
-
-    if (!hasCommentsManager && !hasNotifications && !hasTargets) {
-      await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
-    }
-    await StorageUtil.saveSettings({ isRunning: true, isPaused: false, statusMessage: "正在启动自动化监控..." });
+    await StorageUtil.saveSettings({
+      isRunning: true,
+      isPaused: false,
+      enableCommentsManagerMode: true,
+      statusMessage: "正在启动评论管理工具自动化监控..."
+    });
     chrome.runtime.sendMessage({ action: "START_MONITOR" });
     updateStatusIndicator();
   });
@@ -498,10 +495,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function loadAntibanSettings() {
     const settings = await StorageUtil.getSettings();
-    if (checkEnableCommentsManagerMode) checkEnableCommentsManagerMode.checked = settings.enableCommentsManagerMode !== false;
-    if (checkEnableNotificationMode) checkEnableNotificationMode.checked = !!settings.enableNotificationMode;
-    if (checkEnableTargetUrlsMode) checkEnableTargetUrlsMode.checked = !!settings.enableTargetUrlsMode;
-    if (inputNotificationInterval) inputNotificationInterval.value = settings.notificationCheckInterval || 5;
+    if (inputNotificationInterval) inputNotificationInterval.value = settings.notificationCheckInterval || 15;
 
     inputDmInterval.value = settings.dmIntervalSeconds || 10;
     inputCooldown.value = settings.globalCooldownHours !== undefined ? settings.globalCooldownHours : 24;
@@ -515,10 +509,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function saveAntibanSettings() {
-    const enableCm = checkEnableCommentsManagerMode ? checkEnableCommentsManagerMode.checked : true;
-    const enableNotif = checkEnableNotificationMode ? checkEnableNotificationMode.checked : false;
-    const enableTargets = checkEnableTargetUrlsMode ? checkEnableTargetUrlsMode.checked : false;
-    const notifInterval = parseInt(inputNotificationInterval.value, 10) || 5;
+    const notifInterval = parseInt(inputNotificationInterval?.value, 10) || 15;
 
     const dmSec = parseInt(inputDmInterval.value, 10) || 10;
     const cdHr = parseInt(inputCooldown.value, 10) || 24;
@@ -531,10 +522,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const emergencyBrake = checkEmergencyBrake ? checkEmergencyBrake.checked : true;
 
     await StorageUtil.saveSettings({
-      enableCommentsManagerMode: enableCm,
-      enableNotificationMode: enableNotif,
-      enableTargetUrlsMode: enableTargets,
-      notificationCheckInterval: Math.max(3, notifInterval),
+      enableCommentsManagerMode: true,
+      notificationCheckInterval: Math.max(5, notifInterval),
       dmIntervalSeconds: dmSec,
       globalCooldownHours: cdHr,
       dmCooldownHours: cdHr,

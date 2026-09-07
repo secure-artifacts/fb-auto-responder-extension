@@ -1,5 +1,5 @@
 /**
- * FB 智能私信大师 - Comments Manager Content Script (v1.3.0)
+ * FB 智能私信大师 - Comments Manager Content Script (v1.4.0)
  * 专为 Facebook 专业面板【评论管理工具】打造的集中式极速私信引擎
  * 页面地址: https://www.facebook.com/professional_dashboard/engagement/comments_manager/
  *
@@ -20,19 +20,39 @@
     return;
   }
 
-  console.log("[Comments Manager Engine v1.3.0] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.4.0] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;
   const sessionProcessedKeys = new Set();
 
-  function scheduleNextPoll(seconds) {
+  /**
+   * 调度下一次巡检或自动刷新页面
+   * @param {number} seconds 等待秒数
+   * @param {boolean} shouldReload 是否在等待后执行页面完整刷新（方案 A：从 FB 服务器拉取最新数据）
+   */
+  function scheduleNextPollOrReload(seconds, shouldReload = false) {
     if (pollTimer) {
       clearTimeout(pollTimer);
       pollTimer = null;
     }
-    pollTimer = setTimeout(() => {
-      runCommentsManagerLoop();
+
+    pollTimer = setTimeout(async () => {
+      const current = await StorageUtil.getSettings();
+      if (!current.isRunning || current.isPaused) {
+        console.log("[Comments Manager Engine] 任务已停止或暂停，取消自动刷新/巡检");
+        return;
+      }
+
+      if (shouldReload) {
+        console.log("[Comments Manager Engine] 🔄 空闲等待结束，正在自动刷新页面向 Facebook 服务器同步最新留言...");
+        await StorageUtil.saveSettings({
+          statusMessage: "🔄 正在自动刷新页面，向 Facebook 服务器同步最新留言..."
+        });
+        window.location.reload();
+      } else {
+        runCommentsManagerLoop();
+      }
     }, seconds * 1000);
   }
 
@@ -94,12 +114,12 @@
 
       if (rows.length === 0) {
         window.scrollTo({ top: 0, behavior: 'smooth' });
-        const waitSec = Math.max(3, settings.notificationCheckInterval || 5);
+        const waitSec = Math.max(5, settings.notificationCheckInterval || 15);
         await StorageUtil.saveSettings({
-          statusMessage: `暂无未回复留言，${waitSec} 秒后再次巡检...`
+          statusMessage: `暂无待回复新留言，${waitSec} 秒后自动刷新页面拉取最新留言...`
         });
         isProcessingLoop = false;
-        scheduleNextPoll(waitSec);
+        scheduleNextPollOrReload(waitSec, true); // 触发方案 A 自动刷新
         return;
       }
 
@@ -219,17 +239,45 @@
         await new Promise(r => setTimeout(r, dmIntervalMs));
       }
 
-      // 本轮遍历完成后，轻量向下滚动加载更多未回复
+      // 本轮遍历完成后，检查页面上是否还有残留未回复留言
       console.log(`[Comments Manager Engine] 当前批次处理完成，处理数: ${processedCountInBatch}`);
-      window.scrollBy({ top: 600, behavior: 'smooth' });
-      await new Promise(r => setTimeout(r, 1500));
+
+      // 检查当前屏幕是否有任何尚未处理的留言
+      const allRows = findCommentRows();
+      let hasPending = false;
+      for (const r of allRows) {
+        const p = parseCommentRow(r);
+        const k = (p.userName + "_" + p.commentText).replace(/\s+/g, '_');
+        if (!sessionProcessedKeys.has(k) && !processedComments.includes(k)) {
+          hasPending = true;
+          break;
+        }
+      }
+
+      if (!hasPending) {
+        // 全部处理完毕，进入空闲状态，等待设定秒数后自动刷新页面拉取服务器最新留言
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        const waitSec = Math.max(5, settings.notificationCheckInterval || 15);
+        await StorageUtil.saveSettings({
+          statusMessage: `当前页面留言已全部处理完毕，${waitSec} 秒后自动刷新页面同步最新留言...`
+        });
+        isProcessingLoop = false;
+        scheduleNextPollOrReload(waitSec, true); // 触发方案 A 自动刷新
+        return;
+      } else {
+        // 还有未处理的留言，滚动加载下一页并继续
+        window.scrollBy({ top: 600, behavior: 'smooth' });
+        await new Promise(r => setTimeout(r, 1500));
+        isProcessingLoop = false;
+        scheduleNextPollOrReload(2, false);
+        return;
+      }
 
     } catch (err) {
       console.error("[Comments Manager Engine] 巡检循环异常:", err);
-    } finally {
       isProcessingLoop = false;
-      const waitSec = Math.max(3, settings.notificationCheckInterval || 5);
-      scheduleNextPoll(waitSec);
+      const waitSec = Math.max(5, settings.notificationCheckInterval || 15);
+      scheduleNextPollOrReload(waitSec, true);
     }
   }
 
@@ -1080,6 +1128,6 @@
   }
 
   // 启动巡检
-  scheduleNextPoll(2);
+  scheduleNextPollOrReload(2, false);
 
 })();
