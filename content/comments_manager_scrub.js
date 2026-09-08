@@ -20,11 +20,39 @@
     return;
   }
 
-  console.log("[Comments Manager Engine v1.4.0] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.5.0] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;
   const sessionProcessedKeys = new Set();
+
+  // ★ 统计已扫留言专用状态（疑问 1 选 A：全量扫描计数，跨自动刷新去重）
+  let localTaskSessionId = null;
+  let sessionScannedKeys = new Set();
+
+  function initScannedKeys(settings) {
+    const currentTaskSession = settings.taskSessionId || 0;
+    if (localTaskSessionId !== currentTaskSession || (settings.stats && settings.stats.totalProcessed === 0)) {
+      localTaskSessionId = currentTaskSession;
+      sessionScannedKeys.clear();
+      try { sessionStorage.removeItem('fb_cm_scanned_keys'); } catch(e) {}
+    } else if (sessionScannedKeys.size === 0) {
+      try {
+        const cached = sessionStorage.getItem('fb_cm_scanned_keys');
+        if (cached) {
+          const arr = JSON.parse(cached);
+          sessionScannedKeys = new Set(arr);
+        }
+      } catch(e) {}
+    }
+  }
+
+  function persistScannedKey(key) {
+    sessionScannedKeys.add(key);
+    try {
+      sessionStorage.setItem('fb_cm_scanned_keys', JSON.stringify(Array.from(sessionScannedKeys).slice(-2000)));
+    } catch(e) {}
+  }
 
   /**
    * 调度下一次巡检或自动刷新页面
@@ -92,6 +120,7 @@
     if (checkFacebookEmergencyBrake(settings)) return;
 
     isProcessingLoop = true;
+    initScannedKeys(settings);
 
     try {
       await StorageUtil.saveSettings({
@@ -163,6 +192,16 @@
         }
 
         const commentKey = (parsed.userName + "_" + parsed.commentText).replace(/\s+/g, '_');
+
+        // ★ 准确统计已扫留言（疑问 1 选 A：真实全量扫描数，每检测到一条独特留言即时 +1，刷新不重复累计）
+        if (!sessionScannedKeys.has(commentKey)) {
+          persistScannedKey(commentKey);
+          const curSettings = await StorageUtil.getSettings();
+          const stats = curSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
+          stats.totalProcessed += 1;
+          await StorageUtil.saveSettings({ stats });
+        }
+
         const normName = (parsed.userName || '').toLowerCase().trim();
         const userKey = "usr_" + normName;
         const idKey = parsed.fbId ? ("id_" + parsed.fbId) : null;
@@ -351,7 +390,7 @@
 
     // 更新统计数据
     const stats = currentSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
-    stats.totalProcessed += 1;
+    // 注意：totalProcessed 已在扫描阶段即时增加，此处仅负责更新成功与异常计数
     if (dmResult.success) stats.totalDmSent += 1;
     else stats.totalErrors += 1;
     await StorageUtil.saveSettings({ stats });
@@ -411,6 +450,13 @@
         if (!parsed || !parsed.userName || parsed.userName === "未知用户") continue;
 
         const commentKey = (parsed.userName + "_" + parsed.commentText).replace(/\s+/g, '_');
+        if (!sessionScannedKeys.has(commentKey)) {
+          persistScannedKey(commentKey);
+          const curSettings = await StorageUtil.getSettings();
+          const stats = curSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
+          stats.totalProcessed += 1;
+          await StorageUtil.saveSettings({ stats });
+        }
         if (sessionProcessedKeys.has(commentKey)) continue;
 
         const isCommentAlreadyProcessed = Array.isArray(processedComments)
@@ -595,7 +641,7 @@
   // ---------------------------------------------------------------------------
 
   function findSendMessageButton(container, cachedBtn) {
-    const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
+    const sendKeywords = ['发消息', '发送消息', '發送訊息', '发讯息', '發訊息', '傳送訊息', '发送', '發送', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message', 'kirim pesan'];
 
     if (cachedBtn && document.contains(cachedBtn) && isVisible(cachedBtn)) {
       return cachedBtn;
@@ -637,7 +683,7 @@
   }
 
   function findOpenDmDialog() {
-    const titleKeywords = ['发消息给', '发送消息给', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à'];
+    const titleKeywords = ['发消息给', '发送消息给', '發送訊息給', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à'];
     
     const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], div[aria-modal="true"]'));
     for (const d of dialogs) {
@@ -646,7 +692,7 @@
       if (titleKeywords.some(k => txt.includes(k))) {
         return d;
       }
-      if ((txt.includes('返回评论') || txt.includes('Back to comment') || txt.includes('Voltar ao comentário')) &&
+      if ((txt.includes('返回评论') || txt.includes('返回留言') || txt.includes('返回評論') || txt.includes('Back to comment') || txt.includes('Voltar ao comentário')) &&
           d.querySelector('[contenteditable="true"], textarea')) {
         return d;
       }
@@ -657,7 +703,7 @@
       if (!isVisible(d)) continue;
       const txt = d.innerText || '';
       if (titleKeywords.some(k => txt.includes(k)) && 
-          (txt.includes('返回评论') || txt.includes('Messenger') || txt.includes('Back')) &&
+          (txt.includes('返回评论') || txt.includes('返回留言') || txt.includes('返回評論') || txt.includes('Messenger') || txt.includes('Back')) &&
           d.querySelector('[contenteditable="true"], textarea')) {
         return d;
       }
@@ -744,8 +790,8 @@
   }
 
   async function clickDialogSendButton(dialog) {
-    const sendKeywords = ['发消息', '发送消息', '发送', '發送', '發訊息', '傳送訊息', 'Send message', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan'];
-    const skipKeywords = ['返回', '取消', 'Back', 'Cancel', 'Voltar', '返回评论'];
+    const sendKeywords = ['发消息', '发送消息', '發送訊息', '发送', '發送', '發訊息', '傳送訊息', 'Send message', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan'];
+    const skipKeywords = ['返回', '取消', 'Back', 'Cancel', 'Voltar', '返回评论', '返回留言', '返回評論'];
 
     const allButtons = Array.from(dialog.querySelectorAll('div[role="button"], a[role="link"], button, span[role="button"]'));
     let sendBtn = null;
@@ -807,7 +853,7 @@
   // ---------------------------------------------------------------------------
 
   function findCommentRows() {
-    const sendKeywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message'];
+    const sendKeywords = ['发消息', '发送消息', '發送訊息', '发讯息', '發訊息', '傳送訊息', '发送', '發送', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message', 'kirim pesan'];
     const allClickables = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], a[role="link"], a, button, span, div'));
     
     const sendButtons = allClickables.filter(el => {
@@ -826,11 +872,13 @@
 
       while (curr && curr !== document.body) {
         const text = curr.innerText || '';
-        if ((text.includes('·') || text.includes('•') || /\d+\s*(小时|天|周|月|年|h|d|m)/i.test(text)) && 
-            (text.includes('回复') || text.includes('Reply') || text.includes('隐藏') || text.includes('Hide') || text.includes('赞') || text.includes('Like'))) {
+        if ((text.includes('·') || text.includes('•') || /\d+\s*(小时|小時|天|周|週|月|年|h|d|m|s|min)/i.test(text)) && 
+            (text.includes('回复') || text.includes('回覆') || text.includes('Reply') || 
+             text.includes('隐藏') || text.includes('隱藏') || text.includes('Hide') || 
+             text.includes('赞') || text.includes('讚') || text.includes('Like'))) {
           const innerSendCount = Array.from(curr.querySelectorAll('*')).filter(el => {
             const t = (el.innerText || '').trim();
-            return t === '发消息' || t === 'Send message';
+            return t === '发消息' || t === '發送訊息' || t === '發訊息' || t === '傳送訊息' || t === 'Send message';
           }).length;
 
           if (innerSendCount <= 4) {
@@ -886,8 +934,8 @@
       const rawA = (a.innerText || a.textContent || '').trim();
       if (!rawA) continue;
       const namePart = rawA.split(/[·•]/)[0].trim();
-      const actionWords = ['赞', '回复', '发消息', '隐藏', '...', 'Like', 'Reply', 'Send message', 'Hide'];
-      if (namePart.length > 0 && !actionWords.includes(namePart) && !namePart.includes('条评论') && !namePart.includes('comentários') && namePart !== '没有文字内容') {
+      const actionWords = ['赞', '讚', '回复', '回覆', '发消息', '發送訊息', '發訊息', '傳送訊息', '隐藏', '隱藏', '...', 'Like', 'Reply', 'Send message', 'Hide', '翻譯年糕', '查看回覆', '查看更多回覆', '查看更多回复'];
+      if (namePart.length > 0 && !actionWords.includes(namePart) && !namePart.includes('条评论') && !namePart.includes('則留言') && !namePart.includes('comentários') && !namePart.includes('comments') && namePart !== '没有文字内容') {
         userName = namePart;
         profileLink = a.href;
         break;
@@ -924,7 +972,7 @@
       }
     } else {
       // 兜底：寻找非帖子信息的包含 "·" 的时间行
-      const timeCandidateIdx = lines.findIndex(l => (l.includes('·') || l.includes('•')) && !l.includes('条评论') && !l.includes('comentário') && !l.includes('comment'));
+      const timeCandidateIdx = lines.findIndex(l => (l.includes('·') || l.includes('•')) && !l.includes('条评论') && !l.includes('則留言') && !l.includes('comentário') && !l.includes('comment'));
       if (timeCandidateIdx !== -1) {
         const line = lines[timeCandidateIdx];
         const sep = line.includes('·') ? '·' : '•';
@@ -939,7 +987,7 @@
     }
 
     // 3. 精准提取留言内容（在时间之后、动作按钮之前）
-    const actionWords = ['赞', '回复', '发消息', '隐藏', 'Like', 'Reply', 'Send message', 'Hide', '...'];
+    const actionWords = ['赞', '讚', '回复', '回覆', '发消息', '發送訊息', '發訊息', '傳送訊息', '隐藏', '隱藏', 'Like', 'Reply', 'Send message', 'Hide', '翻譯年糕', '查看回覆', '查看更多回覆', '查看更多回复', '...'];
     const candidateLines = [];
     let startCollecting = (userLineIdx !== -1) ? (userLineIdx + 1) : 1;
 
@@ -947,9 +995,9 @@
       const line = lines[i];
       if (actionWords.includes(line)) break;
       if (line === commentTime || line === userName || line.includes(userName)) continue;
-      if (line.includes('条评论') || line.includes('comentário') || line === '没有文字内容') continue;
+      if (line.includes('条评论') || line.includes('則留言') || line.includes('comentário') || line.includes('comment') || line === '没有文字内容' || line === '翻譯年糕') continue;
       if (isPossibleTimeLine(line)) {
-        if (commentTime === "刚刚") commentTime = line;
+        if (commentTime === "刚刚" || commentTime === "剛剛") commentTime = line;
         continue;
       }
       candidateLines.push(line);
@@ -961,7 +1009,7 @@
 
     // 清理可能混入的开头时间戳
     if (commentText) {
-      commentText = commentText.replace(/^(刚刚|\d+\s*(秒|分钟|小时|天|周|月|年|s|m|h|d|w|y|min|mins|hr|hrs|day|days))\s*[·•\s]*/i, '').trim();
+      commentText = commentText.replace(/^(刚刚|剛剛|\d+\s*(秒|分钟|分鐘|小时|小時|天|周|週|月|年|s|m|h|d|w|y|min|mins|hr|hrs|day|days))\s*[·•\s]*/i, '').trim();
     }
 
     if (!commentText) {
@@ -999,8 +1047,8 @@
   function isPossibleTimeLine(line) {
     if (!line) return false;
     const s = line.trim().toLowerCase();
-    if (/^(刚刚|just now|now|agora)$/.test(s)) return true;
-    if (/^\d+\s*(秒|分|分钟|小时|天|周|月|年|s|m|h|d|w|y|min|mins|hr|hrs|day|days|hora|horas|dia|dias|sem|semana|mês|meses|ano|anos)$/i.test(s)) return true;
+    if (/^(刚刚|剛剛|just now|now|agora)$/.test(s)) return true;
+    if (/^\d+\s*(秒|分|分钟|分鐘|小时|小時|天|周|週|月|年|s|m|h|d|w|y|min|mins|hr|hrs|day|days|hora|horas|dia|dias|sem|semana|mês|meses|ano|anos)$/i.test(s)) return true;
     if (/^(昨天|前天|yesterday|ontem|anteontem)/i.test(s)) return true;
     return false;
   }
@@ -1012,15 +1060,15 @@
     if (!timeStr) return 0;
     const s = timeStr.trim().toLowerCase();
 
-    if (/^(刚刚|just now|now|agora)/i.test(s)) return 0;
+    if (/^(刚刚|剛剛|just now|now|agora)/i.test(s)) return 0;
 
     const secMatch = s.match(/^(\d+)\s*(秒|s|sec|seg)/i);
     if (secMatch) return Math.round(parseInt(secMatch[1], 10) / 60);
 
-    const minMatch = s.match(/^(\d+)\s*(分|分钟|m|min)/i);
+    const minMatch = s.match(/^(\d+)\s*(分|分钟|分鐘|m|min)/i);
     if (minMatch) return parseInt(minMatch[1], 10);
 
-    const hrMatch = s.match(/^(\d+)\s*(小时|h|hr|hora)/i);
+    const hrMatch = s.match(/^(\d+)\s*(小时|小時|h|hr|hora)/i);
     if (hrMatch) return parseInt(hrMatch[1], 10) * 60;
 
     const dayMatch = s.match(/^(\d+)\s*(天|d|day|dia)/i);
@@ -1029,7 +1077,7 @@
     if (/(昨天|yesterday|ontem)/i.test(s)) return 1440;
     if (/(前天|anteontem)/i.test(s)) return 2880;
 
-    if (/(周|w|week|sem)/i.test(s)) return 10080;
+    if (/(周|週|w|week|sem)/i.test(s)) return 10080;
     if (/(月|mo|month|mês)/i.test(s)) return 43200;
     if (/(年|y|year|ano)/i.test(s)) return 525600;
 
@@ -1045,12 +1093,12 @@
     if (!timeStr) return false;
     const s = timeStr.trim().toLowerCase();
 
-    if (/^(刚刚|just now|now|agora|moments ago)/i.test(s)) return false;
+    if (/^(刚刚|剛剛|just now|now|agora|moments ago)/i.test(s)) return false;
     if (/^\d+\s*(秒|s|sec|secs|second|seconds|seg|segundos)$/i.test(s)) return false;
-    if (/^\d+\s*(分|分钟|m|min|mins|minute|minutes|minuto|minutos)$/i.test(s)) return false;
-    if (/^\d+\s*(小时|h|hr|hrs|hour|hours|hora|horas)$/i.test(s)) return false;
+    if (/^\d+\s*(分|分钟|分鐘|m|min|mins|minute|minutes|minuto|minutos)$/i.test(s)) return false;
+    if (/^\d+\s*(小时|小時|h|hr|hrs|hour|hours|hora|horas)$/i.test(s)) return false;
 
-    if (/[天周月年]/.test(s)) return true;
+    if (/[天周週月年]/.test(s)) return true;
     if (/(昨天|前天|yesterday|ontem|anteontem)/i.test(s)) return true;
     if (/\b\d+\s*(d|day|days|w|week|weeks|mo|mon|month|months|y|yr|yrs|year|years)\b/i.test(s)) return true;
     if (/^\d+[dwy]$/i.test(s) || /^\d+mo$/i.test(s)) return true;
@@ -1066,7 +1114,7 @@
       const allButtons = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], div[role="tab"], button, span'));
       const unrepliedBtn = allButtons.find(b => {
         const txt = (b.innerText || b.textContent || '').trim();
-        return txt === '你未回复' || txt === '未回复' || txt === 'Unreplied' || txt === 'Não respondidas' || txt === 'No respondidos';
+        return txt === '你未回复' || txt === '未回复' || txt === '尚未回覆' || txt === '你尚未回覆' || txt === '未回覆' || txt === 'Unreplied' || txt === 'Não respondidas' || txt === 'No respondidos';
       });
 
       if (unrepliedBtn) {

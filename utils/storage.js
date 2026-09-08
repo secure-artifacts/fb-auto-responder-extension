@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = {
   enableTimeWindowFilter: false, // 是否开启时效过滤 (方案二：仅回复最近X分钟内留言)
   maxCommentAgeMinutes: 15, // 时效过滤最大分钟数 (默认15分钟)
   statusMessage: "系统就绪，等待启动任务...",
+  taskSessionId: 0,
   stats: {
     totalProcessed: 0,
     totalDmSent: 0,

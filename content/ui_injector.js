@@ -24,12 +24,30 @@ function showToast(message, type = 'success') {
   }, 3000);
 }
 
+function isPostPermalink(url) {
+  if (!url) return false;
+  const s = url.toLowerCase();
+  return s.includes('/posts/') || 
+         s.includes('/videos/') || 
+         s.includes('/reel/') || 
+         s.includes('/share/p/') || 
+         s.includes('/share/v/') || 
+         s.includes('/share/r/') || 
+         s.includes('permalink.php') || 
+         s.includes('story.php') || 
+         s.includes('photo.php?fbid=') || 
+         s.includes('/photo/?fbid=') || 
+         s.includes('/photos/') || 
+         s.includes('pfbid');
+}
+
 function cleanFbUrl(rawUrl) {
   try {
     const url = new URL(rawUrl, window.location.origin);
-    url.searchParams.delete('__cft__[0]');
-    url.searchParams.delete('__tn__');
-    url.searchParams.delete('fbclid');
+    const paramsToDelete = ['__cft__[0]', '__tn__', 'fbclid', 'ref', 'source', 'mibextid', 'rdid'];
+    for (const p of paramsToDelete) {
+      url.searchParams.delete(p);
+    }
     return url.href;
   } catch (e) {
     return rawUrl;
@@ -37,55 +55,71 @@ function cleanFbUrl(rawUrl) {
 }
 
 function extractPostUrl(actionBar) {
-  // 1. 如果当前页面已经是单独的 Reel 或 视频页
-  if (window.location.href.includes('/reel/') || window.location.href.includes('/videos/')) {
-    // 检查是否是主页信息流中的弹出框，如果是单页直接返回
-    return cleanFbUrl(window.location.href);
+  // 1. 如果当前页面本身已经是单独的贴文详情页、Reel 或 视频页
+  if (isPostPermalink(window.location.href) && !window.location.pathname.endsWith('/')) {
+    const path = window.location.pathname;
+    if (!path.includes('/professional_dashboard/') && 
+        (path.includes('/posts/') || path.includes('/videos/') || path.includes('/reel/') || 
+         path.includes('permalink.php') || path.includes('story.php') || path.includes('/share/'))) {
+      return cleanFbUrl(window.location.href);
+    }
   }
 
-  // 2. 向上寻找贴文容器 (通常是 role="article" 或者是某个较大的容器)
-  let container = actionBar.closest('div[role="article"]');
+  // 2. 向上寻找贴文容器 (适配 FeedUnit, Timeline, role="article" 等多种容器)
+  let container = actionBar.closest('div[role="article"], div[data-pagelet^="FeedUnit"], div[data-pagelet*="Timeline"], div[data-pagelet*="ProfileTimeline"], div[data-pagelet*="feed"], div[role="feed"] > div');
   if (!container) {
-    // 如果没有 role="article"（有些 Reels 或新版 UI 没有），尝试向上找包含发帖人信息的块
     container = actionBar.parentElement;
     for (let i = 0; i < 8; i++) {
-      if (container && container.parentElement) container = container.parentElement;
+      if (container && container.parentElement && container.parentElement !== document.body) {
+        container = container.parentElement;
+        if (container.getAttribute('data-pagelet') || container.getAttribute('role') === 'article') break;
+      }
     }
   }
 
   if (container) {
-    // 寻找时间戳链接，通常包含 posts, videos, permalink, story
+    // 寻找贴文特征链接
     const links = Array.from(container.querySelectorAll('a[href]'));
-    for (let a of links) {
+    for (const a of links) {
       const href = a.getAttribute('href');
-      if (!href || href === '#') continue;
-      if (href.includes('/posts/') || 
-          href.includes('/videos/') || 
-          href.includes('/reel/') || 
-          href.includes('permalink.php') || 
-          href.includes('story.php')) {
-        
-        // 排除掉一些无关的分享或回复链接
-        if (href.includes('comment_id=')) continue;
+      if (!href || href === '#' || href.startsWith('javascript:')) continue;
+      if (href.includes('comment_id=') || href.includes('/comments/')) continue;
+      if (isPostPermalink(href)) {
+        return cleanFbUrl(a.href);
+      }
+    }
 
+    // 备用：检查包含时间文本的链接
+    const timeLinks = links.filter(a => {
+      const txt = (a.innerText || a.getAttribute('aria-label') || '').trim();
+      return /\d+\s*(秒|分|小时|小時|天|周|週|月|年|s|m|h|d|w|y|hr|day|min|mins|剛剛|刚刚|昨天)/i.test(txt);
+    });
+    for (const a of timeLinks) {
+      const href = a.getAttribute('href');
+      if (href && href !== '#' && !href.startsWith('javascript:')) {
         return cleanFbUrl(a.href);
       }
     }
   }
 
-  // 兜底：如果实在找不到，就用当前页面的 URL
-  return cleanFbUrl(window.location.href);
+  // ★ 核心修复：严禁将当前公共主页 URL 作为兜底返回！
+  // 无法识别独立贴文链接时返回 null，彻底防止全页面所有按钮被同时误点亮
+  return null;
 }
 
 async function toggleMonitorStatus(btn, postUrl) {
+  if (!postUrl) {
+    showToast('⚠️ 无法直接解析此贴文链接，请点击贴文发布时间进入单贴后加入监控', 'error');
+    return;
+  }
   try {
     const settings = await StorageUtil.getSettings();
     let urls = settings.targetUrls || [];
-    const isActive = btn.classList.contains('state-active');
+    const isAlreadyMonitored = urls.some(u => u === postUrl || postUrl.includes(u) || u.includes(postUrl));
     
-    if (isActive) {
+    if (isAlreadyMonitored) {
       // 取消监控
-      urls = urls.filter(u => u !== postUrl);
+      urls = urls.filter(u => u !== postUrl && !u.includes(postUrl) && !postUrl.includes(u));
       await StorageUtil.saveSettings({ targetUrls: urls });
       
       btn.classList.remove('state-active');
@@ -94,10 +128,8 @@ async function toggleMonitorStatus(btn, postUrl) {
       showToast('❌ 已取消监控该贴文');
     } else {
       // 加入监控
-      if (!urls.includes(postUrl)) {
-        urls.push(postUrl);
-        await StorageUtil.saveSettings({ targetUrls: urls });
-      }
+      urls.push(postUrl);
+      await StorageUtil.saveSettings({ targetUrls: urls });
       
       btn.classList.remove('state-idle');
       btn.classList.add('state-active');
@@ -184,9 +216,7 @@ async function injectButtons() {
 
     // 提取贴文链接
     const postUrl = extractPostUrl(btnElement);
-    if (!postUrl) return;
-
-    const isMonitored = monitoredUrls.some(u => postUrl.includes(u) || u.includes(postUrl));
+    const isMonitored = postUrl ? monitoredUrls.some(u => postUrl.includes(u) || u.includes(postUrl)) : false;
 
     // 创建精致图标按钮
     const btn = document.createElement('div');
@@ -200,7 +230,8 @@ async function injectButtons() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      toggleMonitorStatus(btn, postUrl);
+      const currentUrl = extractPostUrl(btnElement) || postUrl;
+      toggleMonitorStatus(btn, currentUrl);
     });
 
     // 针对时间线贴文，恢复横向 Flex 排版以修复按钮与“查看更多评论”文本重叠的问题

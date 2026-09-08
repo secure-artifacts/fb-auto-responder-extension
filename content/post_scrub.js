@@ -5,6 +5,7 @@
 (async function () {
   console.log("FB Auto-Responder Post Scrub V5.0 Active.");
 
+  const sessionScannedKeys = new Set();
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
@@ -178,6 +179,13 @@
       if (!commentText) { debugInfo.missingElem++; continue; }
 
       const commentId = userName + "_" + commentText.substring(0, 30);
+      if (!sessionScannedKeys.has(commentId)) {
+        sessionScannedKeys.add(commentId);
+        const curSettings = await StorageUtil.getSettings();
+        const stats = curSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
+        stats.totalProcessed += 1;
+        await StorageUtil.saveSettings({ stats });
+      }
       if (processedComments.includes(commentId)) { debugInfo.cooldown++; continue; }
 
       const matchedObj = findMatchingRule(commentText, rules);
@@ -285,7 +293,7 @@
 
       // 更新统计数据
       const stats = currentSettings.stats || { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
-      stats.totalProcessed += 1;
+      // 注意：totalProcessed 已在扫描阶段即时增加，此处仅负责更新成功与异常计数
       if (dmSentSuccess) stats.totalDmSent += 1;
       else stats.totalErrors += 1;
       await StorageUtil.saveSettings({ stats });
@@ -568,7 +576,7 @@
     
     if (nodes.length === 0) {
       // 超强兼容模式：基于动作按钮逆向寻找容器
-      const actionKeywords = ['回复', '回覆', 'Reply', 'Responder', 'Répondre', 'Balas', '发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan', 'Magpadala ng Mensahe'];
+      const actionKeywords = ['回复', '回覆', 'Reply', 'Responder', 'Répondre', 'Balas', '发消息', '发送消息', '發送訊息', '发讯息', '發訊息', '傳送訊息', '赞', '讚', '隐藏', '隱藏', '翻譯年糕', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan', 'Magpadala ng Mensahe'];
       const els = Array.from(document.querySelectorAll('div[role="button"], span, a, div'));
       const buttons = els.filter(el => {
         if (el.children.length > 2) return false;
@@ -641,7 +649,7 @@
   }
 
   function findSendMessageBtn(node) {
-    const keywords = ['发消息', '发送消息', '发讯息', '發訊息', '傳送訊息', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message', 'kirim pesan', 'magpadala ng mensahe'];
+    const keywords = ['发消息', '发送消息', '發送訊息', '发讯息', '發訊息', '傳送訊息', '发送', '發送', 'send message', 'message', 'enviar mensagem', 'enviar mensaje', 'envoyer un message', 'kirim pesan', 'magpadala ng mensahe'];
     const els = Array.from(node.querySelectorAll('div[role="button"], a[role="link"], span[role="button"], div[tabindex="0"]'));
     
     const normalizeStr = (str) => (str || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -777,7 +785,7 @@
       for (const d of dialogs) {
         if (!isVisible(d)) continue;
         const titleText = d.innerText || '';
-        const titleKeys = ['发消息给', '发送消息给', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à', 'Kirim pesan ke', 'Magpadala ng mensahe kay'];
+        const titleKeys = ['发消息给', '发送消息给', '發送訊息給', '發訊息給', '傳送訊息給', 'Send message to', 'Enviar mensagem para', 'Enviar mensaje a', 'Envoyer un message à', 'Kirim pesan ke', 'Magpadala ng mensahe kay'];
         if (titleKeys.some(k => titleText.includes(k))) {
           return d;
         }
@@ -865,7 +873,7 @@
   }
 
   async function clickDialogSendButton(dialog) {
-    const sendKeywords = ['发消息', '发送消息', '发送', '發送', '發訊息', '傳送訊息', 'Send message', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan', 'Magpadala ng Mensahe'];
+    const sendKeywords = ['发消息', '发送消息', '發送訊息', '发送', '發送', '發訊息', '傳送訊息', 'Send message', 'Send Message', 'Message', 'Enviar mensagem', 'Enviar mensaje', 'Envoyer un message', 'Kirim Pesan', 'Magpadala ng Mensahe'];
     const allButtons = Array.from(dialog.querySelectorAll('div[role="button"], a[role="link"], button, span[role="button"]'));
     let sendBtn = null;
 
@@ -873,7 +881,7 @@
       if (!isVisible(btn)) continue;
       const txt = btn.innerText ? btn.innerText.trim() : '';
       if (sendKeywords.some(kw => txt === kw || txt.includes(kw))) {
-        if (txt.includes('返回') || txt.includes('Back') || txt.includes('返回评论')) continue;
+        if (txt.includes('返回') || txt.includes('Back') || txt.includes('返回评论') || txt.includes('返回留言') || txt.includes('返回評論')) continue;
         sendBtn = btn;
         break;
       }
@@ -883,7 +891,8 @@
       for (const btn of allButtons) {
         if (!isVisible(btn)) continue;
         const label = btn.getAttribute('aria-label') || '';
-        if (sendKeywords.some(kw => label.includes(kw))) {
+        if (label.includes('返回') || label.includes('Back') || label.includes('返回评论') || label.includes('返回留言') || label.includes('返回評論')) continue;
+        if (sendKeywords.some(kw => label === kw || label.includes(kw))) {
           sendBtn = btn;
           break;
         }

@@ -96,11 +96,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
     }
 
-    await StorageUtil.saveSettings({
+    const isResume = settings.isRunning && settings.isPaused;
+    const updatePayload = {
       isRunning: true,
       isPaused: false,
-      statusMessage: "🚀 正在启动自动化监控..."
-    });
+      statusMessage: isResume ? "▶ 恢复自动化监控..." : "🚀 正在启动自动化监控..."
+    };
+
+    // 若为全新启动，重置统计数据（用户指定：每次启动从0开始准确展示本次战报）
+    if (!isResume) {
+      updatePayload.stats = { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
+    }
+
+    await StorageUtil.saveSettings(updatePayload);
 
     sendMessageSafe({ action: "START_MONITOR" });
     await refreshUI();

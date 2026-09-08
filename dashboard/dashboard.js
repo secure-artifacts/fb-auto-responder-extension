@@ -89,11 +89,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
     }
 
-    await StorageUtil.saveSettings({
+    const isResume = settings.isRunning && settings.isPaused;
+    const updatePayload = {
       isRunning: true,
       isPaused: false,
-      statusMessage: "正在启动自动化监控..."
-    });
+      statusMessage: isResume ? "恢复自动化监控..." : "正在启动自动化监控..."
+    };
+
+    if (!isResume) {
+      updatePayload.stats = { totalProcessed: 0, totalDmSent: 0, totalErrors: 0 };
+    }
+
+    await StorageUtil.saveSettings(updatePayload);
     chrome.runtime.sendMessage({ action: "START_MONITOR" });
     updateStatusIndicator();
   });
