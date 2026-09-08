@@ -5,7 +5,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const pageTitle = document.getElementById('pageTitle');
 
   const tabTitles = {
-    'tab-urls': '目标贴文管理',
     'tab-rules': '关键词与回复规则',
     'tab-antiban': '防封与去重策略',
     'tab-sheets': '谷歌在线表格同步',
@@ -26,7 +25,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (targetTab === 'tab-sheets') renderGoogleSheets();
       if (targetTab === 'tab-logs') renderLogs();
-      if (targetTab === 'tab-urls') loadUrls();
       if (targetTab === 'tab-antiban') loadAntibanSettings();
       if (targetTab === 'tab-rules') renderRules();
     });
@@ -82,12 +80,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   topBtnStart.addEventListener('click', async () => {
     const settings = await StorageUtil.getSettings();
-    const hasCm = settings.enableCommentsManagerMode !== false;
-    const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
-
-    if (!hasCm && !hasTargets) {
-      await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
-    }
+    await StorageUtil.saveSettings({
+      enableCommentsManagerMode: true,
+      enableTargetUrlsMode: false
+    });
 
     const isResume = settings.isRunning && settings.isPaused;
     const updatePayload = {
@@ -114,65 +110,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 定时轮询状态面板
   setInterval(updateStatusIndicator, 1500);
 
-  // ==================== TAB 1: 贴文管理 ====================
-  const inputTargetUrls = document.getElementById('inputTargetUrls');
-  const inputActiveUrls = document.getElementById('inputActiveUrls');
-  const checkEnableFillerUrls = document.getElementById('checkEnableFillerUrls');
-  const btnSaveUrls = document.getElementById('btnSaveUrls');
-  const btnClearTargetUrls = document.getElementById('btnClearTargetUrls');
-  const btnClearActiveUrls = document.getElementById('btnClearActiveUrls');
-  const tipSaveUrls = document.getElementById('tipSaveUrls');
-
-  async function loadUrls() {
-    const settings = await StorageUtil.getSettings();
-    inputTargetUrls.value = (settings.targetUrls || []).join('\n');
-    inputActiveUrls.value = (settings.activeUrls || []).join('\n');
-    if (checkEnableFillerUrls) {
-      checkEnableFillerUrls.checked = settings.enableFillerUrls !== false;
-    }
+  // 一键打开评论管理工具页面
+  const btnOpenCommentsManagerFromDash = document.getElementById('btnOpenCommentsManagerFromDash');
+  if (btnOpenCommentsManagerFromDash) {
+    btnOpenCommentsManagerFromDash.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: "OPEN_COMMENTS_MANAGER" });
+    });
   }
 
-  btnSaveUrls.addEventListener('click', async () => {
-    const targetLines = inputTargetUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
-    const activeLines = inputActiveUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
-    const enableFiller = checkEnableFillerUrls ? checkEnableFillerUrls.checked : true;
-    await StorageUtil.saveSettings({ targetUrls: targetLines, activeUrls: activeLines, enableFillerUrls: enableFiller });
-    tipSaveUrls.textContent = `✓ 已成功保存 ${targetLines.length} 条监控贴文，${activeLines.length} 条伪装链接！`;
-    setTimeout(() => tipSaveUrls.textContent = '', 3000);
-  });
-
-  btnClearTargetUrls.addEventListener('click', async () => {
-    if (confirm("确定要清空所有监控贴文链接吗？")) {
-      inputTargetUrls.value = '';
-      const activeLines = inputActiveUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
-      await StorageUtil.saveSettings({ targetUrls: [], activeUrls: activeLines });
-      tipSaveUrls.textContent = `✓ 已清空监控贴文！`;
-      setTimeout(() => tipSaveUrls.textContent = '', 3000);
-    }
-  });
-
-  btnClearActiveUrls.addEventListener('click', async () => {
-    if (confirm("确定要清空所有伪装链接吗？")) {
-      inputActiveUrls.value = '';
-      const targetLines = inputTargetUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
-      await StorageUtil.saveSettings({ targetUrls: targetLines, activeUrls: [] });
-      tipSaveUrls.textContent = `✓ 已清空伪装链接！`;
-      setTimeout(() => tipSaveUrls.textContent = '', 3000);
-    }
-  });
-
-  // 监听 Storage 变化，如果在当前页面停留，实现自动刷新
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local' && changes.settings) {
-      // 只有当前选中目标贴文 Tab 才自动刷新（避免打断用户输入）
-      if (document.getElementById('tab-urls').classList.contains('active') && document.activeElement !== inputTargetUrls) {
-        loadUrls();
-      }
-    }
-  });
-
-  // 初始化加载
-  loadUrls();
+  // 初始化加载默认规则面板
+  renderRules();
 
   // ==================== 谷歌表格高阶单元格网格 Component ====================
 
@@ -490,15 +437,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnModalSave.addEventListener('click', saveRuleFromModal);
 
   // ==================== TAB 3: 防封与去重设置 ====================
-  const checkEnableCommentsManagerMode = document.getElementById('checkEnableCommentsManagerMode');
-  const checkEnableNotificationMode = document.getElementById('checkEnableNotificationMode');
-  const checkEnableTargetUrlsMode = document.getElementById('checkEnableTargetUrlsMode');
   const inputNotificationInterval = document.getElementById('inputNotificationInterval');
   const inputDmInterval = document.getElementById('inputDmInterval');
   const inputCooldown = document.getElementById('inputCooldown');
-  const inputSwitchInterval = document.getElementById('inputSwitchInterval');
-  const inputFillerWaitMin = document.getElementById('inputFillerWaitMin');
-  const inputFillerWaitMax = document.getElementById('inputFillerWaitMax');
   const checkEnableTimeWindowFilter = document.getElementById('checkEnableTimeWindowFilter');
   const inputMaxCommentAgeMinutes = document.getElementById('inputMaxCommentAgeMinutes');
   const checkIncludeHistory = document.getElementById('checkIncludeHistory');
@@ -509,15 +450,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function loadAntibanSettings() {
     const settings = await StorageUtil.getSettings();
-    if (checkEnableCommentsManagerMode) checkEnableCommentsManagerMode.checked = settings.enableCommentsManagerMode !== false;
-    if (checkEnableTargetUrlsMode) checkEnableTargetUrlsMode.checked = !!settings.enableTargetUrlsMode;
     if (inputNotificationInterval) inputNotificationInterval.value = settings.notificationCheckInterval || 15;
-
     inputDmInterval.value = settings.dmIntervalSeconds || 10;
     inputCooldown.value = settings.globalCooldownHours !== undefined ? settings.globalCooldownHours : 24;
-    inputSwitchInterval.value = settings.switchIntervalSeconds || 15;
-    inputFillerWaitMin.value = settings.fillerWaitMin || 15;
-    inputFillerWaitMax.value = settings.fillerWaitMax || 45;
     if (checkEnableTimeWindowFilter) checkEnableTimeWindowFilter.checked = !!settings.enableTimeWindowFilter;
     if (inputMaxCommentAgeMinutes) inputMaxCommentAgeMinutes.value = settings.maxCommentAgeMinutes || 15;
     if (checkIncludeHistory) checkIncludeHistory.checked = !!settings.includeHistory;
@@ -525,30 +460,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function saveAntibanSettings() {
-    const enableCm = checkEnableCommentsManagerMode ? checkEnableCommentsManagerMode.checked : true;
-    const enableTargets = checkEnableTargetUrlsMode ? checkEnableTargetUrlsMode.checked : false;
     const notifInterval = parseInt(inputNotificationInterval?.value, 10) || 15;
-
     const dmSec = parseInt(inputDmInterval.value, 10) || 10;
     const cdHr = parseInt(inputCooldown.value, 10) || 24;
-    const switchSec = parseInt(inputSwitchInterval.value, 10) || 15;
-    const fillerMin = parseInt(inputFillerWaitMin.value, 10) || 15;
-    const fillerMax = parseInt(inputFillerWaitMax.value, 10) || 45;
     const enableTimeWindow = checkEnableTimeWindowFilter ? checkEnableTimeWindowFilter.checked : false;
     const maxAgeMinutes = parseInt(inputMaxCommentAgeMinutes?.value, 10) || 15;
     const includeHistory = checkIncludeHistory ? checkIncludeHistory.checked : false;
     const emergencyBrake = checkEmergencyBrake ? checkEmergencyBrake.checked : true;
 
     await StorageUtil.saveSettings({
-      enableCommentsManagerMode: enableCm,
-      enableTargetUrlsMode: enableTargets,
+      enableCommentsManagerMode: true,
+      enableTargetUrlsMode: false,
       notificationCheckInterval: Math.max(5, notifInterval),
       dmIntervalSeconds: dmSec,
       globalCooldownHours: cdHr,
       dmCooldownHours: cdHr,
-      switchIntervalSeconds: switchSec,
-      fillerWaitMin: fillerMin,
-      fillerWaitMax: Math.max(fillerMin, fillerMax),
       enableTimeWindowFilter: enableTimeWindow,
       maxCommentAgeMinutes: Math.max(1, maxAgeMinutes),
       includeHistory: includeHistory,
@@ -560,13 +486,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (btnSaveAntiban) btnSaveAntiban.addEventListener('click', saveAntibanSettings);
-  if (checkEnableCommentsManagerMode) checkEnableCommentsManagerMode.addEventListener('change', saveAntibanSettings);
-  if (checkEnableNotificationMode) checkEnableNotificationMode.addEventListener('change', saveAntibanSettings);
-  if (checkEnableTargetUrlsMode) checkEnableTargetUrlsMode.addEventListener('change', saveAntibanSettings);
   if (inputNotificationInterval) inputNotificationInterval.addEventListener('change', saveAntibanSettings);
   inputDmInterval.addEventListener('change', saveAntibanSettings);
   inputCooldown.addEventListener('change', saveAntibanSettings);
-  inputSwitchInterval.addEventListener('change', saveAntibanSettings);
   if (checkEnableTimeWindowFilter) checkEnableTimeWindowFilter.addEventListener('change', saveAntibanSettings);
   if (inputMaxCommentAgeMinutes) inputMaxCommentAgeMinutes.addEventListener('change', saveAntibanSettings);
   if (checkIncludeHistory) checkIncludeHistory.addEventListener('change', saveAntibanSettings);

@@ -14,16 +14,12 @@
         <img src="../assets/icon128.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-title">
           <h2>FB 智能私信大师</h2>
-          <span>Pro Studio v1.4.1</span>
+          <span>Pro Studio v1.6.0</span>
         </div>
       </div>
 
       <nav class="nav-menu">
-        <button class="nav-item active" data-tab="tab-urls">
-          <span class="nav-icon">📌</span>
-          <span>目标贴文列表</span>
-        </button>
-        <button class="nav-item" data-tab="tab-rules">
+        <button class="nav-item active" data-tab="tab-rules">
           <span class="nav-icon">⚡</span>
           <span>关键词与回复规则</span>
         </button>
@@ -57,7 +53,7 @@
     <main class="main-content">
       <header class="top-bar">
         <div class="top-title-group">
-          <div class="top-title" id="pageTitle">目标贴文管理</div>
+          <div class="top-title" id="pageTitle">关键词与回复规则</div>
           <div class="live-status-pill idle" id="topStatusPill">
             <span class="pill-dot"></span>
             <span id="topStatusPillText">系统就绪 (已停机)</span>
@@ -77,50 +73,8 @@
 
       <div class="content-body">
 
-        <!-- TAB 1: 目标贴文列表 -->
-        <section class="tab-panel active" id="tab-urls">
-          <div class="card">
-            <div class="card-header">
-              <h3>📌 监控贴文 URL 列表</h3>
-              <p class="subtitle">请输入你需要自动化监控的 FB 贴文完整链接（支持谷歌表格直接复制多行一键粘贴）</p>
-            </div>
-            <div class="card-body">
-              <div style="position: relative;">
-                <textarea id="inputTargetUrls" class="form-textarea" rows="4" placeholder="https://www.facebook.com/permalink.php?story_fbid=...\nhttps://www.facebook.com/pageName/posts/..."></textarea>
-                <div style="text-align: right; margin-top: 4px;">
-                  <button class="btn btn-danger-outline btn-sm" id="btnClearTargetUrls" style="font-size: 12px; padding: 4px 8px;">🗑️ 清空监控链接</button>
-                </div>
-              </div>
-              
-              <div class="mt-4">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  <label class="grid-title" style="margin: 0;">🌟 活跃账号伪装链接 (防封必备)</label>
-                  <label class="checkbox-label" style="margin: 0;">
-                    <input type="checkbox" id="checkEnableFillerUrls" checked>
-                    <span style="font-size: 13px; font-weight: normal;">启用伪装访问 (若需极速抢线回复可暂时关闭)</span>
-                  </label>
-                </div>
-                <small class="help-text">插件在扫描贴文之间，会随机访问以下链接，完全模拟真人浏览和滚动，极大降低被检测风险。（一行一个）</small>
-                <div style="position: relative;">
-                  <textarea id="inputActiveUrls" class="form-textarea mt-2" rows="3" placeholder="https://www.facebook.com/\nhttps://www.facebook.com/reels"></textarea>
-                  <div style="text-align: right; margin-top: 4px;">
-                    <button class="btn btn-danger-outline btn-sm" id="btnClearActiveUrls" style="font-size: 12px; padding: 4px 8px;">🗑️ 清空伪装链接</button>
-                  </div>
-                </div>
-              </div>
-
-              <div class="form-actions mt-3">
-                <div class="btn-group">
-                  <button class="btn btn-primary" id="btnSaveUrls">保存全部链接</button>
-                </div>
-                <span class="save-tip" id="tipSaveUrls"></span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- TAB 2: 关键词与回复规则 -->
-        <section class="tab-panel" id="tab-rules">
+        <!-- TAB 1: 关键词与回复规则 -->
+        <section class="tab-panel active" id="tab-rules">
           <div class="card">
             <div class="card-header">
               <div class="header-with-btn">
@@ -149,39 +103,22 @@
             <div class="card-body">
               <div class="form-grid">
 
-                <div class="form-group full-width-group" style="grid-column: 1 / -1; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                  <h4 style="margin: 0 0 12px 0; color: #10b981; font-size: 15px; font-weight: 700;">📡 监控模式选择 (可根据业务需求按需开启)</h4>
-                  
-                  <!-- 模式 1: 评论管理工具 -->
-                  <div style="background: rgba(0,0,0,0.12); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 14px; margin-bottom: 12px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                      <label class="checkbox-label" style="font-weight: 700; color: #10b981; font-size: 14px; cursor: pointer;">
-                        <input type="checkbox" id="checkEnableCommentsManagerMode" checked>
-                        <span>模式 A：专业面板【评论管理工具】监控 (🚀 强烈推荐：集中回复全主页未回复留言)</span>
-                      </label>
-                      <button type="button" class="btn btn-sm" id="btnOpenCommentsManagerFromDash" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">
-                        🔗 一键打开评论管理页面
-                      </button>
-                    </div>
-                    <p style="margin: 0 0 10px 24px; font-size: 12px; color: var(--text-muted); line-height: 1.4;">
-                      全主页集中监控，通过页面内原生弹窗直接私信，支持新客插队优先秒发。
-                    </p>
-                    <div style="margin-left: 24px; display: flex; align-items: center; gap: 10px;">
-                      <label style="font-size: 13px; font-weight: 600; white-space: nowrap;">🔄 空闲自动刷新间隔:</label>
-                      <input type="number" id="inputNotificationInterval" class="form-input" min="5" max="300" value="15" style="width: 80px;">
-                      <span style="font-size: 12px; color: var(--text-muted);">秒 (当本页留言回复完后，倒计时自动刷新向 FB 服务器拉取最新进来的留言)</span>
-                    </div>
+                <div class="form-group full-width-group" style="grid-column: 1 / -1; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 14px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <h4 style="margin: 0; color: #10b981; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                      <span>💎 自动化引擎：专业面板【评论管理工具】全主页集中监控</span>
+                    </h4>
+                    <button type="button" class="btn btn-sm" id="btnOpenCommentsManagerFromDash" style="background: rgba(16, 185, 129, 0.25); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.5); padding: 5px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+                      🔗 一键打开评论管理页面
+                    </button>
                   </div>
-
-                  <!-- 模式 2: 指定贴文循环 -->
-                  <div style="background: rgba(0,0,0,0.12); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 14px;">
-                    <label class="checkbox-label" style="font-weight: 700; color: var(--accent-cyan); font-size: 14px; cursor: pointer;">
-                      <input type="checkbox" id="checkEnableTargetUrlsMode">
-                      <span>模式 B：指定贴文列表循环监控 (🎯 前台单个贴文添加链接 / 轮流巡检指定贴文)</span>
-                    </label>
-                    <p style="margin: 4px 0 0 24px; font-size: 12px; color: var(--text-muted); line-height: 1.4;">
-                      轮流访问【目标贴文管理】中填写的链接列表，或在 Facebook 前台贴文下方点击“🌟 一键加入监控”添加的指定贴文，逐一打开贴文展开评论区回复。
-                    </p>
+                  <p style="margin: 0 0 12px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+                    全主页集中自动过筛“未回复”留言，原生弹窗直接秒级私信，全自动空闲刷新向服务器拉取新客，无需配置或添加任何贴文链接！
+                  </p>
+                  <div style="display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.15); padding: 10px 14px; border-radius: 6px;">
+                    <label style="font-size: 13px; font-weight: 600; white-space: nowrap; color: #e2e8f0;">🔄 空闲自动刷新间隔:</label>
+                    <input type="number" id="inputNotificationInterval" class="form-input" min="5" max="300" value="15" style="width: 80px;">
+                    <span style="font-size: 12px; color: var(--text-muted);">秒 (当本页留言处理完后，倒计时自动向 FB 服务器拉取最新进来的留言)</span>
                   </div>
                 </div>
 
@@ -192,26 +129,6 @@
                     <span>秒</span>
                   </div>
                   <small class="help-text">在连续私信不同用户时，每发送一条后的等待时间。设置合适的间隔可以防止操作过快被限制。</small>
-                </div>
-
-                <div class="form-group">
-                  <label>页面停留与切换间隔 (秒):</label>
-                  <div class="range-inputs">
-                    <input type="number" id="inputSwitchInterval" class="form-input" min="5" max="300" value="15">
-                    <span>秒</span>
-                  </div>
-                  <small class="help-text">针对目标贴文页面的固定停留与等待时间。时间越长越安全。</small>
-                </div>
-
-                <div class="form-group">
-                  <label>伪装页面随机停留时间 (秒):</label>
-                  <div class="range-inputs" style="display: flex; align-items: center; gap: 10px;">
-                    <input type="number" id="inputFillerWaitMin" class="form-input" min="5" max="300" value="15" style="width: 80px;">
-                    <span>至</span>
-                    <input type="number" id="inputFillerWaitMax" class="form-input" min="5" max="600" value="45" style="width: 80px;">
-                    <span>秒</span>
-                  </div>
-                  <small class="help-text">每次访问伪装链接时，在这个范围内随机生成一个时间，模拟真人的停留与滚动。</small>
                 </div>
 
                 <div class="form-group">

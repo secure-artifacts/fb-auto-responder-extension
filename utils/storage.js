@@ -5,26 +5,15 @@
 const DEFAULT_SETTINGS = {
   isRunning: false,
   isPaused: false,
-  targetUrls: [],
-  activeUrls: [
-    "https://www.facebook.com/",
-    "https://www.facebook.com/reels",
-    "https://www.facebook.com/events"
-  ],
-  globalCooldownHours: 24,
   dmCooldownHours: 24, // 私信专属 24 小时冷却
   dmIntervalSeconds: 10, // 连续发私信的时间间隔
-  switchIntervalSeconds: 15, // 页面停留与切换间隔（秒）
-  enableFillerUrls: true, // 是否开启伪装链接防封浏览
-  fillerWaitMin: 15, // 伪装页面最短停留时间（秒）
-  fillerWaitMax: 45, // 伪装页面最长停留时间（秒）
-  emergencyBrakeEnabled: true,
-  emergencyBrakeReason: "",
-  enableCommentsManagerMode: true, // 是否开启专业面板【评论管理工具】监控 (首选)
-  enableTargetUrlsMode: false, // 是否开启指定贴文列表循环监控
   notificationCheckInterval: 15, // 空闲自动刷新间隔（秒，默认15秒）
   enableTimeWindowFilter: false, // 是否开启时效过滤 (方案二：仅回复最近X分钟内留言)
   maxCommentAgeMinutes: 15, // 时效过滤最大分钟数 (默认15分钟)
+  emergencyBrakeEnabled: true,
+  emergencyBrakeReason: "",
+  enableCommentsManagerMode: true, // 专业面板【评论管理工具】全主页集中监控 (唯一首选引擎)
+  enableTargetUrlsMode: false,
   statusMessage: "系统就绪，等待启动任务...",
   taskSessionId: 0,
   stats: {
@@ -47,53 +36,14 @@ const DEFAULT_RULES = [
   }
 ];
 
-function sanitizeTargetUrls(urls) {
-  if (!Array.isArray(urls)) return [];
-  const cleaned = [];
-  for (const raw of urls) {
-    if (!raw || typeof raw !== 'string') continue;
-    const trimmed = raw.trim();
-    if (!trimmed) continue;
-    // 严格过滤 profile.php 占位或个人主页
-    if (trimmed.includes('profile.php#') || trimmed.includes('profile.php?')) continue;
-    try {
-      const u = new URL(trimmed);
-      if (u.pathname.includes('profile.php')) continue;
-      const paramsToDelete = [
-        '__cft__[0]', '__tn__', 'fbclid', 'ref', 'source', 'mibextid', 'rdid',
-        'comment_id', 'reply_comment_id', 'notif_id', 'notif_t', 'refid', 'paipv', 'locale'
-      ];
-      for (const p of paramsToDelete) {
-        u.searchParams.delete(p);
-      }
-      u.hash = '';
-      const finalUrl = u.href;
-      if (!cleaned.includes(finalUrl)) {
-        cleaned.push(finalUrl);
-      }
-    } catch (e) {
-      if (!cleaned.includes(trimmed)) cleaned.push(trimmed);
-    }
-  }
-  return cleaned;
-}
-
 const StorageUtil = {
-  sanitizeTargetUrls,
-
   async getSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(['settings'], (res) => {
         const data = { ...DEFAULT_SETTINGS, ...(res.settings || {}) };
-        if (Array.isArray(data.targetUrls)) {
-          const originalCount = data.targetUrls.length;
-          const originalJson = JSON.stringify(data.targetUrls);
-          data.targetUrls = sanitizeTargetUrls(data.targetUrls);
-          // 若发现 profile.php# 等脏数据或未清洗的参数，立即自动清洗并静默持久化回 storage
-          if (data.targetUrls.length !== originalCount || JSON.stringify(data.targetUrls) !== originalJson) {
-            chrome.storage.local.set({ settings: data });
-          }
-        }
+        // 强制确保始终运行模式 A
+        data.enableCommentsManagerMode = true;
+        data.enableTargetUrlsMode = false;
         resolve(data);
       });
     });
@@ -101,10 +51,7 @@ const StorageUtil = {
 
   async saveSettings(newSettings) {
     const current = await this.getSettings();
-    if (Array.isArray(newSettings.targetUrls)) {
-      newSettings.targetUrls = sanitizeTargetUrls(newSettings.targetUrls);
-    }
-    const updated = { ...current, ...newSettings };
+    const updated = { ...current, ...newSettings, enableCommentsManagerMode: true, enableTargetUrlsMode: false };
     return new Promise((resolve) => {
       chrome.storage.local.set({ settings: updated }, () => resolve(updated));
     });

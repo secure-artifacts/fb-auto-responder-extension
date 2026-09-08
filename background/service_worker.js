@@ -1,6 +1,6 @@
 /**
- * FB 智能私信大师 - Background Service Worker v5.0.0
- * 单标签轮询架构：维护唯一一个工作标签页，依次处理贴文 URL
+ * FB 智能私信大师 - Background Service Worker v6.0.0
+ * 单标签稳定架构：专为专业面板【评论管理工具】集中监控打造
  */
 
 importScripts('../utils/storage.js');
@@ -8,7 +8,7 @@ importScripts('../utils/storage.js');
 async function getWorkerState() {
   return new Promise(resolve => {
     chrome.storage.local.get(['workerState'], (res) => {
-      resolve(res.workerState || { workerTabId: null, currentUrlIndex: 0, isNextFiller: false });
+      resolve(res.workerState || { workerTabId: null });
     });
   });
 }
@@ -21,7 +21,7 @@ async function setWorkerState(newState) {
   });
 }
 
-console.log("FB Auto-Responder Service Worker v5.1.0 Initialized (Anti-Sleep & Strict Single-Tab Guard).");
+console.log("FB Auto-Responder Service Worker v6.0.0 Initialized (Pure Comments Manager Mode A).");
 
 // ── 监听来自 Popup 与 Content Script 的指令 ──────────────────────────────
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
@@ -38,8 +38,8 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     triggerEmergencyBrake(req.reason);
     sendResponse({ status: "BRAKED" });
   } else if (req.action === "PAGE_FINISHED") {
-    // Content Script 报告当前页面已处理完毕，切换下一个 URL
-    console.log("收到 PAGE_FINISHED，准备切换下一条贴文");
+    // Content Script 报告当前批次已处理完毕，按设定间隔调度下一次巡检
+    console.log("收到 PAGE_FINISHED，准备调度下一次巡检");
     scheduleNextUrl();
     sendResponse({ status: "ACK" });
   } else if (req.action === "SYNC_GOOGLE_SHEETS") {
@@ -64,7 +64,6 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
       sendResponse({ success: false, error: err.message });
     });
     return true; // 异步响应
-
   }
   return true;
 });
@@ -72,17 +71,11 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 // ── 核心调度逻辑 ────────────────────────────────────────────────────────────
 
 async function startMonitoring() {
-  const settings = await StorageUtil.getSettings();
-  const hasCm = settings.enableCommentsManagerMode !== false;
-  const hasTargets = settings.enableTargetUrlsMode && settings.targetUrls && settings.targetUrls.length > 0;
-
-  if (!hasCm && !hasTargets) {
-    await StorageUtil.saveSettings({ enableCommentsManagerMode: true });
-  }
-
   await StorageUtil.saveSettings({
     isRunning: true,
     isPaused: false,
+    enableCommentsManagerMode: true,
+    enableTargetUrlsMode: false,
     emergencyBrakeReason: ""
   });
   loadCurrentUrl();
@@ -91,7 +84,7 @@ async function startMonitoring() {
 async function stopMonitoring(isPaused) {
   await StorageUtil.saveSettings({ isRunning: false, isPaused: isPaused });
   if (!isPaused) {
-    await setWorkerState({ currentUrlIndex: 0, forceTargetUrl: false });
+    await setWorkerState({ workerTabId: null });
   }
   await closeWorkerTab();
 }
@@ -105,74 +98,18 @@ async function scheduleNextUrl() {
   setTimeout(() => {
     loadCurrentUrl();
   }, waitSec * 1000);
-
-  // 纯指定贴文循环监控模式
-  const urls = settings.targetUrls || [];
-  if (urls.length === 0) return;
-
-  const state = await getWorkerState();
-  let currentUrlIndex = state.currentUrlIndex;
-
-  // 只有当刚处理完目标贴文（即 isNextFiller 为 true），才将目标贴文 index + 1
-  if (state.isNextFiller) {
-    currentUrlIndex++;
-    if (currentUrlIndex >= urls.length) {
-      currentUrlIndex = 0;
-    }
-    await setWorkerState({ currentUrlIndex });
-  }
-
-  // 页面切换间隔，防封（读取用户设置，默认 15 秒）
-  const waitMs = (settings.switchIntervalSeconds || 15) * 1000;
-  await StorageUtil.saveSettings({ statusMessage: `等待 ${waitMs / 1000} 秒后切换至下一个链接...` });
-  setTimeout(() => {
-    loadCurrentUrl();
-  }, waitMs);
 }
 
 async function loadCurrentUrl() {
   const settings = await StorageUtil.getSettings();
   if (!settings.isRunning || settings.isPaused) return;
 
-  const isCm = settings.enableCommentsManagerMode !== false;
-  const isTargets = settings.enableTargetUrlsMode === true && settings.targetUrls && settings.targetUrls.length > 0;
-  let targetUrl = "";
-  const state = await getWorkerState();
-
-  if (isTargets && !state.forceTargetUrl && (!isCm || state.currentWorkerMode === 'target' || state.currentWorkerMode === 'filler')) {
-    // 模式 B: 指定贴文循环模式 (或前台单贴文一键监控)
-    const targets = settings.targetUrls || [];
-    const fillers = settings.activeUrls || [];
-    let currentUrlIndex = state.currentUrlIndex || 0;
-    let isNextFiller = state.isNextFiller;
-
-    if (isNextFiller && fillers.length > 0 && settings.enableFillerUrls !== false) {
-      targetUrl = fillers[Math.floor(Math.random() * fillers.length)];
-      await StorageUtil.saveSettings({
-        statusMessage: `正在访问伪装链接 (防封浏览): ${targetUrl.substring(0, 45)}...`,
-        currentWorkerMode: 'filler'
-      });
-      await setWorkerState({ isNextFiller: false, lastFillerUrl: targetUrl });
-    } else {
-      if (currentUrlIndex >= targets.length) {
-        currentUrlIndex = 0;
-        await setWorkerState({ currentUrlIndex });
-      }
-      targetUrl = targets[currentUrlIndex];
-      await StorageUtil.saveSettings({
-        statusMessage: `正在监控指定贴文 [${currentUrlIndex + 1}/${targets.length}]: ${targetUrl.substring(0, 45)}...`,
-        currentWorkerMode: 'target'
-      });
-      await setWorkerState({ isNextFiller: true });
-    }
-  } else {
-    // 模式 A: 专业面板评论管理工具模式 (默认首选)
-    targetUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
-    await StorageUtil.saveSettings({
-      statusMessage: "正在驻留专业面板【评论管理工具】，集中响应未回复留言...",
-      currentWorkerMode: 'comments_manager'
-    });
-  }
+  // 唯一核心模式：专业面板【评论管理工具】全主页集中监控
+  const targetUrl = "https://www.facebook.com/professional_dashboard/engagement/comments_manager/";
+  await StorageUtil.saveSettings({
+    statusMessage: "正在驻留专业面板【评论管理工具】，集中响应未回复留言...",
+    currentWorkerMode: 'comments_manager'
+  });
 
   // 统一交给单标签安全调度守卫处理（查重、防多开、防休眠、防硬刷）
   await ensureWorkerTab(targetUrl);
@@ -216,9 +153,8 @@ async function ensureWorkerTab(targetUrl) {
 
   // 如果 activeWorkerTab 已经失效，但在所有打开的标签页里找到了现成的 Facebook 页面，优先认领并复用！
   if (!activeWorkerTab && allFbTabs.length > 0) {
-    const matchedTab = allFbTabs.find(t => t.url && stripUrl(t.url) === targetClean) ||
-                       allFbTabs.find(t => t.url && stripUrl(t.url).includes('/comments_manager')) ||
-                       allFbTabs.find(t => t.url && stripUrl(t.url).includes('/notifications')) ||
+    const matchedTab = allFbTabs.find(t => t.url && stripUrl(t.url).includes('/comments_manager')) ||
+                       allFbTabs.find(t => t.url && stripUrl(t.url) === targetClean) ||
                        allFbTabs[0];
     if (matchedTab) {
       console.log(`[Worker Tab Guard] 成功从已有标签页中认领并复用: ID ${matchedTab.id} (${matchedTab.url})`);
@@ -227,13 +163,13 @@ async function ensureWorkerTab(targetUrl) {
     }
   }
 
-  // 3. 严格去重：如果发现当前浏览器中有多个 /notifications 标签页，关闭除当前工作标签之外的所有重复项！
+  // 3. 严格去重：如果发现当前浏览器中有多个 /comments_manager 标签页，关闭除当前工作标签之外的所有重复项！
   if (allFbTabs.length > 1) {
     for (const t of allFbTabs) {
       if (activeWorkerTab && t.id === activeWorkerTab.id) continue;
       const cleanU = stripUrl(t.url);
-      if (cleanU.includes('/notifications') || cleanU.includes('/comments_manager')) {
-        console.warn(`[Worker Tab Guard] 发现多余的工作标签页 ID ${t.id}，自动清理关闭，保持全局单标签！`);
+      if (cleanU.includes('/comments_manager')) {
+        console.warn(`[Worker Tab Guard] 发现多余的评论管理标签页 ID ${t.id}，自动清理关闭，保持全局单标签！`);
         chrome.tabs.remove(t.id, () => {
           if (chrome.runtime.lastError) { /* ignore */ }
         });
