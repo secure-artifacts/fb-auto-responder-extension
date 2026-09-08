@@ -20,7 +20,7 @@
     return;
   }
 
-  console.log("[Comments Manager Engine v1.5.1] 专业面板评论管理工具引擎已挂载！");
+  console.log("[Comments Manager Engine v1.5.2] 专业面板评论管理工具引擎已挂载！");
 
   let isProcessingLoop = false;
   let pollTimer = null;

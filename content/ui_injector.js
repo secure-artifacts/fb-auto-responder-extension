@@ -115,30 +115,35 @@ function findTimestampAnchor(container) {
 }
 
 /**
- * 在贴文容器内寻找已有真实直达链接 (Reel, Video, Photo, Posts, pfbid 等，排除评论区)
+ * 在贴文容器内寻找已有真实直达链接 (Reel, Video, Photo, Posts, pfbid 等，支持从评论区永久链接提取)
  */
 function findValidPostLinkInContainer(container) {
   if (!container) return null;
 
-  const allLinks = Array.from(container.querySelectorAll('a[href]'));
-  const postLinks = allLinks.filter(a => {
-    if (a.closest('ul') || a.closest('form')) return false;
-    if (a.closest('div[role="article"] div[role="article"]')) return false;
-    if (a.closest('.fb-auto-dm-btn')) return false;
-    return true;
-  });
+  // 1. 最强黄金探测：从该贴文评论的直达链接反解！
+  // Facebook 评论的直达链接格式是：{PostURL}/?comment_id={ID}
+  // 剥离 comment_id 后的 URL 100% 为该贴文的真实直达永久 URL！
+  const commentLinks = Array.from(container.querySelectorAll('a[href*="comment_id="], a[href*="/comments/"]'));
+  for (const a of commentLinks) {
+    const raw = a.getAttribute('href') || '';
+    if (raw.includes('profile.php')) continue;
+    const cleaned = cleanFbUrl(a.href);
+    if (cleaned && isPostPermalink(cleaned)) {
+      return cleaned;
+    }
+  }
 
-  for (const a of postLinks) {
+  // 2. 扫描容器内所有直达链接 (Reel, Video, Watch, Posts, Photo, Permalink 等)
+  const allLinks = Array.from(container.querySelectorAll('a[href]'));
+  for (const a of allLinks) {
     const rawHref = a.getAttribute('href') || '';
     if (!rawHref || rawHref === '#' || rawHref.startsWith('javascript:')) continue;
     if (rawHref.includes('profile.php')) continue;
 
     const fullUrl = a.href || '';
-    if (isPostPermalink(fullUrl)) {
-      const cleaned = cleanFbUrl(fullUrl);
-      if (cleaned && isPostPermalink(cleaned)) {
-        return cleaned;
-      }
+    const cleaned = cleanFbUrl(fullUrl);
+    if (cleaned && isPostPermalink(cleaned)) {
+      return cleaned;
     }
   }
 
@@ -156,17 +161,27 @@ async function resolvePostUrl(btnElement, postContainer) {
     return cleanFbUrl(curUrl);
   }
 
-  const container = postContainer || getPostContainer(btnElement);
-  if (!container) return null;
+  let container = postContainer || getPostContainer(btnElement);
 
-  // 2. 检查容器内现有的真实直达链接 (Photo, Video, Reel, Posts, pfbid 等)
-  const validLink = findValidPostLinkInContainer(container);
+  // 2. 检查容器内现有的真实直达链接 (优先探测评论 comment_id 及贴文内直达链接)
+  let validLink = findValidPostLinkInContainer(container);
   if (validLink) {
     return validLink;
   }
 
-  // 3. 寻找时间戳链接并进行 Facebook Comet 深度水合 (Hydration)
-  const timeAnchor = findTimestampAnchor(container);
+  // 3. 若当前容器未命中，向上逐层扩大范围（最多 10 层）探测包含评论或视频的外层卡片容器
+  let cur = container ? container.parentElement : btnElement.parentElement;
+  for (let i = 0; i < 10; i++) {
+    if (!cur || cur === document.body) break;
+    validLink = findValidPostLinkInContainer(cur);
+    if (validLink) {
+      return validLink;
+    }
+    cur = cur.parentElement;
+  }
+
+  // 4. 寻找时间戳链接并进行 Facebook Comet 深度水合 (Hydration)
+  const timeAnchor = findTimestampAnchor(container) || (container?.parentElement ? findTimestampAnchor(container.parentElement) : null);
   if (timeAnchor) {
     hydrateLink(timeAnchor);
 
@@ -193,12 +208,6 @@ async function resolvePostUrl(btnElement, postContainer) {
     }
   }
 
-  // 4. 再次扫描容器
-  const finalCheck = findValidPostLinkInContainer(container);
-  if (finalCheck) {
-    return finalCheck;
-  }
-
   // 坚决返回 null，彻底杜绝 profile.php# 占位链接
   return null;
 }
@@ -211,17 +220,7 @@ function extractPostUrl(actionBar) {
     return cleanFbUrl(curUrl);
   }
 
-  let container = actionBar.closest('div[role="article"], div[data-pagelet^="FeedUnit"], div[data-pagelet*="Timeline"], div[data-pagelet*="ProfileTimeline"], div[data-pagelet*="feed"], div[role="feed"] > div');
-  if (!container) {
-    container = actionBar.parentElement;
-    for (let i = 0; i < 8; i++) {
-      if (container && container.parentElement && container.parentElement !== document.body) {
-        container = container.parentElement;
-        if (container.getAttribute('data-pagelet') || container.getAttribute('role') === 'article') break;
-      }
-    }
-  }
-
+  const container = getPostContainer(actionBar);
   if (container) {
     const validLink = findValidPostLinkInContainer(container);
     if (validLink) return validLink;
@@ -283,19 +282,34 @@ async function toggleMonitorStatus(btn, postUrl, container) {
 }
 
 function getPostContainer(btn) {
+  if (!btn) return null;
   let c = btn.closest('div[role="article"]') || 
           btn.closest('div[data-pagelet^="FeedUnit"]') ||
+          btn.closest('div[data-pagelet*="Timeline"]') ||
+          btn.closest('div[data-pagelet*="ProfileTimeline"]') ||
           btn.closest('div[data-pagelet*="Reel"]') ||
-          btn.closest('div[aria-label*="Reel"]');
-  if (!c) {
-    c = btn.parentElement;
-    for (let i = 0; i < 6; i++) {
-      if (c && c.parentElement && c.parentElement !== document.body) {
-        c = c.parentElement;
-      }
+          btn.closest('div[aria-label*="Reel"]') ||
+          btn.closest('div[aria-label*="短片"]') ||
+          btn.closest('div[role="feed"] > div');
+
+  // 向上多层寻找包含评论或视频的完整贴文卡片
+  let cur = btn.parentElement;
+  let candidate = c;
+  for (let i = 0; i < 12; i++) {
+    if (!cur || cur === document.body) break;
+    // 若找到包含 comment_id 链接，证明已包含该贴文的完整评论区
+    if (cur.querySelector('a[href*="comment_id="]')) {
+      candidate = cur;
+      break;
     }
+    // 若找到包含 video 或 /reel/ 链接
+    if (cur.querySelector('video') || cur.querySelector('a[href*="/reel/"]')) {
+      candidate = cur;
+    }
+    cur = cur.parentElement;
   }
-  return c;
+
+  return candidate || c || btn.parentElement;
 }
 
 function getBestTargetButton(container) {
