@@ -47,17 +47,63 @@ const DEFAULT_RULES = [
   }
 ];
 
+function sanitizeTargetUrls(urls) {
+  if (!Array.isArray(urls)) return [];
+  const cleaned = [];
+  for (const raw of urls) {
+    if (!raw || typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    // 严格过滤 profile.php 占位或个人主页
+    if (trimmed.includes('profile.php#') || trimmed.includes('profile.php?')) continue;
+    try {
+      const u = new URL(trimmed);
+      if (u.pathname.includes('profile.php')) continue;
+      const paramsToDelete = [
+        '__cft__[0]', '__tn__', 'fbclid', 'ref', 'source', 'mibextid', 'rdid',
+        'comment_id', 'reply_comment_id', 'notif_id', 'notif_t', 'refid', 'paipv', 'locale'
+      ];
+      for (const p of paramsToDelete) {
+        u.searchParams.delete(p);
+      }
+      u.hash = '';
+      const finalUrl = u.href;
+      if (!cleaned.includes(finalUrl)) {
+        cleaned.push(finalUrl);
+      }
+    } catch (e) {
+      if (!cleaned.includes(trimmed)) cleaned.push(trimmed);
+    }
+  }
+  return cleaned;
+}
+
 const StorageUtil = {
+  sanitizeTargetUrls,
+
   async getSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(['settings'], (res) => {
-        resolve({ ...DEFAULT_SETTINGS, ...(res.settings || {}) });
+        const data = { ...DEFAULT_SETTINGS, ...(res.settings || {}) };
+        if (Array.isArray(data.targetUrls)) {
+          const originalCount = data.targetUrls.length;
+          const originalJson = JSON.stringify(data.targetUrls);
+          data.targetUrls = sanitizeTargetUrls(data.targetUrls);
+          // 若发现 profile.php# 等脏数据或未清洗的参数，立即自动清洗并静默持久化回 storage
+          if (data.targetUrls.length !== originalCount || JSON.stringify(data.targetUrls) !== originalJson) {
+            chrome.storage.local.set({ settings: data });
+          }
+        }
+        resolve(data);
       });
     });
   },
 
   async saveSettings(newSettings) {
     const current = await this.getSettings();
+    if (Array.isArray(newSettings.targetUrls)) {
+      newSettings.targetUrls = sanitizeTargetUrls(newSettings.targetUrls);
+    }
     const updated = { ...current, ...newSettings };
     return new Promise((resolve) => {
       chrome.storage.local.set({ settings: updated }, () => resolve(updated));

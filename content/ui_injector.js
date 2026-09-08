@@ -27,8 +27,12 @@ function showToast(message, type = 'success') {
 function isPostPermalink(url) {
   if (!url) return false;
   const s = url.toLowerCase();
+  // 必须严格拒绝 profile.php 相关链接 (无论是 profile.php# 还是 profile.php?)
+  if (s.includes('profile.php')) return false;
+
   return s.includes('/posts/') || 
          s.includes('/videos/') || 
+         s.includes('/watch') ||
          s.includes('/reel/') || 
          s.includes('/share/p/') || 
          s.includes('/share/v/') || 
@@ -37,35 +41,176 @@ function isPostPermalink(url) {
          s.includes('story.php') || 
          s.includes('photo.php?fbid=') || 
          s.includes('/photo/?fbid=') || 
+         s.includes('/photo?fbid=') || 
          s.includes('/photos/') || 
          s.includes('pfbid');
 }
 
 function cleanFbUrl(rawUrl) {
+  if (!rawUrl) return null;
   try {
     const url = new URL(rawUrl, window.location.origin);
-    const paramsToDelete = ['__cft__[0]', '__tn__', 'fbclid', 'ref', 'source', 'mibextid', 'rdid'];
+    // 严格剔除 profile.php
+    if (url.pathname.includes('profile.php')) return null;
+
+    const paramsToDelete = [
+      '__cft__[0]', '__tn__', 'fbclid', 'ref', 'source', 'mibextid', 'rdid',
+      'comment_id', 'reply_comment_id', 'notif_id', 'notif_t', 'refid', 'paipv', 'locale'
+    ];
     for (const p of paramsToDelete) {
       url.searchParams.delete(p);
     }
+    url.hash = ''; // 剥离任何 #?hdf 等占位 hash
     return url.href;
   } catch (e) {
     return rawUrl;
   }
 }
 
-function extractPostUrl(actionBar) {
-  // 1. 如果当前页面本身已经是单独的贴文详情页、Reel 或 视频页
-  if (isPostPermalink(window.location.href) && !window.location.pathname.endsWith('/')) {
-    const path = window.location.pathname;
-    if (!path.includes('/professional_dashboard/') && 
-        (path.includes('/posts/') || path.includes('/videos/') || path.includes('/reel/') || 
-         path.includes('permalink.php') || path.includes('story.php') || path.includes('/share/'))) {
-      return cleanFbUrl(window.location.href);
+/**
+ * 触发 Facebook Comet 深度链接水合
+ * 通过模拟原生事件促使 React / CometLink 将 profile.php# 替换为真实的直达链接
+ */
+function hydrateLink(element) {
+  if (!element) return;
+  const events = [
+    new PointerEvent('pointerover', { bubbles: true, cancelable: true, view: window }),
+    new PointerEvent('pointerenter', { bubbles: false, cancelable: true, view: window }),
+    new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }),
+    new MouseEvent('mouseenter', { bubbles: false, cancelable: true, view: window }),
+    new FocusEvent('focusin', { bubbles: true, cancelable: true, view: window }),
+    new FocusEvent('focus', { bubbles: false, cancelable: true, view: window }),
+    new MouseEvent('contextmenu', { bubbles: true, cancelable: true, view: window })
+  ];
+  for (const ev of events) {
+    try { element.dispatchEvent(ev); } catch (e) {}
+  }
+  const children = Array.from(element.querySelectorAll('*'));
+  for (const child of children) {
+    for (const ev of events) {
+      try { child.dispatchEvent(ev); } catch (e) {}
+    }
+  }
+}
+
+/**
+ * 在贴文容器内寻找时间戳链接元素（排除评论区）
+ */
+function findTimestampAnchor(container) {
+  if (!container) return null;
+
+  const links = Array.from(container.querySelectorAll('a[href]')).filter(a => {
+    // 严苛排除评论区、回复区、输入框、已注入按钮内部
+    if (a.closest('ul') || a.closest('form')) return false;
+    if (a.closest('div[role="article"] div[role="article"]')) return false;
+    if (a.closest('.fb-auto-dm-btn')) return false;
+
+    const txt = (a.innerText || a.getAttribute('aria-label') || '').trim();
+    return /\d+\s*(秒|分|小时|小時|天|周|週|月|年|s|m|h|d|w|y|hr|day|min|mins|剛剛|刚刚|昨天)/i.test(txt) ||
+           /(\d{1,4}\s*年\s*)?\d{1,2}\s*月\s*\d{1,2}\s*日/.test(txt) ||
+           /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}/i.test(txt);
+  });
+
+  return links[0] || null;
+}
+
+/**
+ * 在贴文容器内寻找已有真实直达链接 (Reel, Video, Photo, Posts, pfbid 等，排除评论区)
+ */
+function findValidPostLinkInContainer(container) {
+  if (!container) return null;
+
+  const allLinks = Array.from(container.querySelectorAll('a[href]'));
+  const postLinks = allLinks.filter(a => {
+    if (a.closest('ul') || a.closest('form')) return false;
+    if (a.closest('div[role="article"] div[role="article"]')) return false;
+    if (a.closest('.fb-auto-dm-btn')) return false;
+    return true;
+  });
+
+  for (const a of postLinks) {
+    const rawHref = a.getAttribute('href') || '';
+    if (!rawHref || rawHref === '#' || rawHref.startsWith('javascript:')) continue;
+    if (rawHref.includes('profile.php')) continue;
+
+    const fullUrl = a.href || '';
+    if (isPostPermalink(fullUrl)) {
+      const cleaned = cleanFbUrl(fullUrl);
+      if (cleaned && isPostPermalink(cleaned)) {
+        return cleaned;
+      }
     }
   }
 
-  // 2. 向上寻找贴文容器 (适配 FeedUnit, Timeline, role="article" 等多种容器)
+  return null;
+}
+
+/**
+ * 智能解析贴文直达真实 URL (多阶段水合与容错校验)
+ */
+async function resolvePostUrl(btnElement, postContainer) {
+  // 1. 如果当前页面本身已经是单独的贴文详情页、Reel、Photo 或 视频页
+  const curUrl = window.location.href;
+  const curPath = window.location.pathname;
+  if (!curPath.includes('/professional_dashboard/') && isPostPermalink(curUrl)) {
+    return cleanFbUrl(curUrl);
+  }
+
+  const container = postContainer || getPostContainer(btnElement);
+  if (!container) return null;
+
+  // 2. 检查容器内现有的真实直达链接 (Photo, Video, Reel, Posts, pfbid 等)
+  const validLink = findValidPostLinkInContainer(container);
+  if (validLink) {
+    return validLink;
+  }
+
+  // 3. 寻找时间戳链接并进行 Facebook Comet 深度水合 (Hydration)
+  const timeAnchor = findTimestampAnchor(container);
+  if (timeAnchor) {
+    hydrateLink(timeAnchor);
+
+    if (isPostPermalink(timeAnchor.href)) {
+      const cleaned = cleanFbUrl(timeAnchor.href);
+      if (cleaned && isPostPermalink(cleaned)) return cleaned;
+    }
+
+    // 等待 120ms 供 Comet 渲染或写入 href
+    await new Promise(r => setTimeout(r, 120));
+
+    if (isPostPermalink(timeAnchor.href)) {
+      const cleaned = cleanFbUrl(timeAnchor.href);
+      if (cleaned && isPostPermalink(cleaned)) return cleaned;
+    }
+
+    // 二次尝试水合
+    hydrateLink(timeAnchor);
+    await new Promise(r => setTimeout(r, 80));
+
+    if (isPostPermalink(timeAnchor.href)) {
+      const cleaned = cleanFbUrl(timeAnchor.href);
+      if (cleaned && isPostPermalink(cleaned)) return cleaned;
+    }
+  }
+
+  // 4. 再次扫描容器
+  const finalCheck = findValidPostLinkInContainer(container);
+  if (finalCheck) {
+    return finalCheck;
+  }
+
+  // 坚决返回 null，彻底杜绝 profile.php# 占位链接
+  return null;
+}
+
+function extractPostUrl(actionBar) {
+  // 同步初筛接口（供 inject 初始状态判断）
+  const curUrl = window.location.href;
+  const curPath = window.location.pathname;
+  if (!curPath.includes('/professional_dashboard/') && isPostPermalink(curUrl)) {
+    return cleanFbUrl(curUrl);
+  }
+
   let container = actionBar.closest('div[role="article"], div[data-pagelet^="FeedUnit"], div[data-pagelet*="Timeline"], div[data-pagelet*="ProfileTimeline"], div[data-pagelet*="feed"], div[role="feed"] > div');
   if (!container) {
     container = actionBar.parentElement;
@@ -78,38 +223,33 @@ function extractPostUrl(actionBar) {
   }
 
   if (container) {
-    // 寻找贴文特征链接
-    const links = Array.from(container.querySelectorAll('a[href]'));
-    for (const a of links) {
-      const href = a.getAttribute('href');
-      if (!href || href === '#' || href.startsWith('javascript:')) continue;
-      if (href.includes('comment_id=') || href.includes('/comments/')) continue;
-      if (isPostPermalink(href)) {
-        return cleanFbUrl(a.href);
-      }
-    }
+    const validLink = findValidPostLinkInContainer(container);
+    if (validLink) return validLink;
 
-    // 备用：检查包含时间文本的链接
-    const timeLinks = links.filter(a => {
-      const txt = (a.innerText || a.getAttribute('aria-label') || '').trim();
-      return /\d+\s*(秒|分|小时|小時|天|周|週|月|年|s|m|h|d|w|y|hr|day|min|mins|剛剛|刚刚|昨天)/i.test(txt);
-    });
-    for (const a of timeLinks) {
-      const href = a.getAttribute('href');
-      if (href && href !== '#' && !href.startsWith('javascript:')) {
-        return cleanFbUrl(a.href);
-      }
+    const timeAnchor = findTimestampAnchor(container);
+    if (timeAnchor && isPostPermalink(timeAnchor.href)) {
+      return cleanFbUrl(timeAnchor.href);
     }
   }
 
-  // ★ 核心修复：严禁将当前公共主页 URL 作为兜底返回！
-  // 无法识别独立贴文链接时返回 null，彻底防止全页面所有按钮被同时误点亮
   return null;
 }
 
-async function toggleMonitorStatus(btn, postUrl) {
+async function toggleMonitorStatus(btn, postUrl, container) {
   if (!postUrl) {
-    showToast('⚠️ 无法直接解析此贴文链接，请点击贴文发布时间进入单贴后加入监控', 'error');
+    // 尝试高亮时间戳元素，引导用户一键点击单贴添加
+    const timeAnchor = container ? findTimestampAnchor(container) : null;
+    if (timeAnchor) {
+      timeAnchor.style.outline = '3px solid #1877f2';
+      timeAnchor.style.borderRadius = '4px';
+      timeAnchor.style.transition = 'outline 0.3s ease';
+      setTimeout(() => {
+        timeAnchor.style.outline = '';
+      }, 3000);
+      showToast('💡 已标出贴文发布时间，请点击进入单贴后一键加入监控', 'error');
+    } else {
+      showToast('⚠️ 无法直接解析此贴文链接，请点击贴文发布时间进入单贴后加入监控', 'error');
+    }
     return;
   }
   try {
@@ -214,7 +354,11 @@ async function injectButtons() {
     // 标记当前贴文互动栏
     actionBar.setAttribute('data-dm-injected', 'true');
 
-    // 提取贴文链接
+    // 尝试对贴文时间戳链接进行预防水合
+    const timeAnchor = findTimestampAnchor(postContainer);
+    if (timeAnchor) hydrateLink(timeAnchor);
+
+    // 提取贴文链接 (初筛)
     const postUrl = extractPostUrl(btnElement);
     const isMonitored = postUrl ? monitoredUrls.some(u => postUrl.includes(u) || u.includes(postUrl)) : false;
 
@@ -227,11 +371,20 @@ async function injectButtons() {
     img.src = chrome.runtime.getURL("assets/icon48.png");
     btn.appendChild(img);
 
-    btn.addEventListener('click', (e) => {
+    // 鼠标悬停到按钮时立即执行前置水合，为点击争取充分的 React 渲染时间
+    btn.addEventListener('mouseenter', () => {
+      const c = getPostContainer(btnElement) || postContainer;
+      if (c) {
+        const a = findTimestampAnchor(c);
+        if (a) hydrateLink(a);
+      }
+    });
+
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       e.preventDefault();
-      const currentUrl = extractPostUrl(btnElement) || postUrl;
-      toggleMonitorStatus(btn, currentUrl);
+      const currentUrl = await resolvePostUrl(btnElement, postContainer);
+      toggleMonitorStatus(btn, currentUrl, postContainer);
     });
 
     // 针对时间线贴文，恢复横向 Flex 排版以修复按钮与“查看更多评论”文本重叠的问题
